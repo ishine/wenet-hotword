@@ -1,171 +1,226 @@
-# WeNet
+<div align="center">
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-brightgreen.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Python-Version](https://img.shields.io/badge/Python-3.7%7C3.8-brightgreen)](https://github.com/wenet-e2e/wenet)
-[![WeChat](https://img.shields.io/badge/WeChat-07C160?style=flat&logo=wechat&logoColor=white)](#discussion--communication)
+# ⚡ WeNet Hotword Pipeline
 
-[**Roadmap**](https://github.com/wenet-e2e/wenet/issues/1683)
-| [**Docs**](https://wenet-e2e.github.io/wenet)
-| [**Papers**](https://wenet-e2e.github.io/wenet/papers.html)
-| [**Runtime**](https://github.com/wenet-e2e/wenet/tree/main/runtime)
-| [**Pretrained Models**](docs/pretrained_models.md)
-| [**HuggingFace**](https://huggingface.co/spaces/wenet/wenet_demo)
-| [**Ask WeNet Guru**](https://gurubase.io/g/wenet)
+**Hotword-biased decoding for the [WeNet](https://github.com/wenet-e2e/wenet) C++ runtime.**
 
-**We** share **Net** together.
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-brightgreen.svg)](https://opensource.org/licenses/Apache-2.0)
+[![C++17](https://img.shields.io/badge/C%2B%2B-17-00599C.svg)](https://en.cppreference.com/w/cpp/17)
+[![LibTorch 2.2.0](https://img.shields.io/badge/LibTorch-2.2.0-EE4C2C.svg)](https://pytorch.org/cppdocs/)
 
-## Highlights
+[**Eval Writeup**](runtime/libtorch/eval_runs/HOTWORD_EVAL.md) | [**Autotune**](tools/autotune.py) | [**Runtime**](runtime/libtorch/)
 
-* **Production first and production ready**: The core design principle, WeNet provides full stack production solutions for speech recognition.
-* **Accurate**: WeNet achieves SOTA results on a lot of public speech datasets.
-* **Light weight**: WeNet is easy to install, easy to use, well designed, and well documented.
+</div>
+
+## 🌟 Features
+
+- **Phoneme Corrector** — fuzzy-matches phoneme spans in the CTC nbest against the hotword list.
+- **Confidence-Weighted Match Bonus** — per-hotword reward scales by 1 / acoustic-confidence.
+- **LRU Hotword Cache** — recurring hotwords get a lowered fuzzy threshold in streaming.
+- **Multi-Objective Autotuner** — Optuna NSGA-II over (F1, CER); held-out eval on a disjoint test set.
+
+---
+
+## 🚀 Quick Start
 
 
-## Install
+### 1. Create the project venv and install Python deps
 
-### Install python package
-
-``` sh
-pip install git+https://github.com/wenet-e2e/wenet.git
+```bash
+uv venv .venv --python 3.12
+source .venv/bin/activate
+uv pip install -i https://pypi.tuna.tsinghua.edu.cn/simple modelscope "huggingface_hub[cli]" pyyaml dacite pyarrow optuna
 ```
 
-**Command-line usage** (use `-h` for parameters):
+### 2. Download model + hotword test set
 
-``` sh
-wenet -m paraformer audio.wav
+```bash
+modelscope download --model wenet/u2pp_conformer-asr-cn-16k-online \
+  --local_dir ~/userspace/wenet/models/u2pp_conformer-asr-cn-16k-online
+bash tools/prepare_aishell_hotwords.sh ~/userspace/wenet/aishell_test
 ```
 
-You can set `-m` with `paraformer` or `firered` or `wenetspeech` for chinese,
-and set it to `whisper-large-v3` or `whisper-large-v3-turbo` for english.
+### 3. Build the C++ runtime
 
-
-**Python programming usage**:
-
-``` python
-import wenet
-
-model = wenet.load_model('paraformer')
-result = model.transcribe('audio.wav')
-print(result.text)
-```
-
-Please refer [python usage](docs/python_package.md) for more command line and python programming usage.
-
-### Install for training & deployment
-
-- Clone the repo
-``` sh
-git clone https://github.com/wenet-e2e/wenet.git
-```
-
-- Install Conda: please see https://docs.conda.io/en/latest/miniconda.html
-- Create Conda env:
-
-``` sh
-conda create -n wenet python=3.10
-conda activate wenet
-conda install conda-forge::sox
-```
-
-- Install CUDA: please follow this [link](https://icefall.readthedocs.io/en/latest/installation/index.html#id1), It's recommended to install CUDA 12.1
-- Install torch and torchaudio, It's recomended to use 2.2.2+cu121:
-
-``` sh
-pip install torch==2.2.2+cu121 torchaudio==2.2.2+cu121 -f https://download.pytorch.org/whl/torch_stable.html
-```
-
-<details><summary><b>For Ascend NPU users:</b></summary>
-
-- Install CANN: please follow this [link](https://ascend.github.io/docs/sources/ascend/quick_install.html) to install CANN toolkit and kernels.
-
-- Install WeNet with torch-npu dependencies:
-
-``` sh
-pip install -e .[torch-npu]
-```
-
-- Related version control table:
-
-| Requirement  |      Minimum     | Recommend   |
-| ------------ | ---------------- | ----------- |
-| CANN         | 8.0.RC2.alpha003 | latest      |
-| torch        | 2.1.0            | 2.2.0       |
-| torch-npu    | 2.1.0            | 2.2.0       |
-| torchaudio   | 2.1.0            | 2.2.0       |
-| deepspeed    | 0.13.2           | latest      |
-
-</details>
-
-- Install other python packages
-
-``` sh
-pip install -r requirements.txt
-pre-commit install  # for clean and tidy code
-```
-
-- Frequently Asked Questions (FAQs)
-
-``` sh
-# If you encounter sox compatibility issues
-RuntimeError: set_buffer_size requires sox extension which is not available.
-# ubuntu
-sudo apt-get install sox libsox-dev
-# centos
-sudo yum install sox sox-devel
-# conda env
-conda install  conda-forge::sox
-```
-
-**Build for deployment**
-
-Optionally, if you want to use x86 runtime or language model(LM),
-you have to build the runtime as follows. Otherwise, you can just ignore this step.
-
-``` sh
-# runtime build requires cmake 3.14 or above
+```bash
 cd runtime/libtorch
-mkdir build && cd build && cmake -DGRAPH_TOOLS=ON .. && cmake --build .
+WENET_GH_MIRROR=https://gh-proxy.com/https://github.com \
+  cmake -B build -DGRAPH_TOOLS=ON -DTORCH=ON
+cmake --build build -j --target decoder_main
+cd ../
 ```
 
-Please see [doc](https://github.com/wenet-e2e/wenet/tree/main/runtime) for building
-runtime on more platforms and OS.
+### 4. Smoke test
 
-
-## Discussion & Communication
-
-You can directly discuss on [Github Issues](https://github.com/wenet-e2e/wenet/issues).
-
-For Chinese users, you can also scan the QR code on the left to follow our official account of WeNet.
-We created a WeChat group for better discussion and quicker response.
-Please scan the personal QR code on the right, and the guy is responsible for inviting you to the chat group.
-
-| <img src="https://github.com/robin1001/qr/blob/master/wenet.jpeg" width="250px"> |<img src="https://github.com/robin1001/qr/blob/master/chengdong.jpg" width="250px">| <img src="https://github.com/robin1001/qr/blob/master/binbin.jpeg" width="250px"> |
-| ---- | ---- | ---- |
-
-
-## Acknowledge
-
-1. We borrowed a lot of code from [ESPnet](https://github.com/espnet/espnet) for transformer based modeling.
-2. We borrowed a lot of code from [Kaldi](http://kaldi-asr.org/) for WFST based decoding for LM integration.
-3. We referred [EESEN](https://github.com/srvk/eesen) for building TLG based graph for LM integration.
-4. We referred to [OpenTransformer](https://github.com/ZhengkunTian/OpenTransformer/) for python batch inference of e2e models.
-
-## Citations
-
-``` bibtex
-@inproceedings{yao2021wenet,
-title={WeNet: Production oriented Streaming and Non-streaming End-to-End Speech Recognition Toolkit},
-author={Yao, Zhuoyuan and Wu, Di and Wang, Xiong and Zhang, Binbin and Yu, Fan and Yang, Chao and Peng, Zhendong and Chen, Xiaoyu and Xie, Lei and Lei, Xin},
-  booktitle={Proc. Interspeech},
-  year={2021},
-  address={Brno, Czech Republic },
-  organization={IEEE}
-}
-
-@article{zhang2022wenet,
-  title={WeNet 2.0: More Productive End-to-End Speech Recognition Toolkit},
-  author={Zhang, Binbin and Wu, Di and Peng, Zhendong and Song, Xingchen and Yao, Zhuoyuan and Lv, Hang and Xie, Lei and Yang, Chao and Pan, Fuping and Niu, Jianwei},
-  journal={arXiv preprint arXiv:2203.15455},
-  year={2022}
-}
+```bash
+head -1 ~/userspace/wenet/aishell_test/wav.scp > /tmp/one.scp
+runtime/libtorch/build/bin/decoder_main \
+  --model_path ~/userspace/wenet/models/u2pp_conformer-asr-cn-16k-online/final.zip \
+  --unit_path  ~/userspace/wenet/models/u2pp_conformer-asr-cn-16k-online/units.txt \
+  --wav_scp    /tmp/one.scp \
+  --hotword_path     ~/userspace/wenet/aishell_test/hotwords.txt \
+  --pinyin_dict_path runtime/libtorch/build/bin/dict \
+  --result     /dev/stdout
 ```
+
+Add confidence / cache / context-graph flags from `run_ablations.sh` to enable the rest.
+
+### 5. Run the ablation
+
+```bash
+bash runtime/libtorch/eval_runs/run_ablations.sh
+column -ts $'\t' runtime/libtorch/eval_runs/summary.tsv
+```
+
+### 6. Autotune
+
+Tunes on `paths.testset_dir` then re-runs the knee config on `paths.eval_testset_dir` to report the held-out number. 100 NSGA-II trials, ~75 min on the AISHELL set; the SQLite study at `autotune.study_db` is resumable.
+
+```bash
+python3 tools/autotune.py \
+  --config       runtime/libtorch/configs/default.yaml \
+  --search-space runtime/libtorch/configs/search_space.yaml
+```
+
+---
+
+## ⚙️ Configuration
+
+Knobs in `runtime/libtorch/configs/default.yaml`; autotuner search space in `runtime/libtorch/configs/search_space.yaml`.
+
+```yaml
+paths:
+  decoder_bin:       runtime/libtorch/build/bin/decoder_main
+  model_dir:         ~/userspace/wenet/models/u2pp_conformer-asr-cn-16k-online
+  testset_dir:       ~/userspace/wenet/aishell_test                # tune set
+  eval_testset_dir:  ~/userspace/wenet/aishell1_indep_hotword      # held-out test
+  pinyin_dict_dir:   runtime/libtorch/build/bin/dict
+  out_dir:           runtime/libtorch/eval_runs
+```
+
+```yaml
+decode:
+  chunk_size:       -1               # [-1, 16, 32, 64]  -1 = non-streaming
+  ctc_weight:       0.5              # CTC vs attention at rescoring
+  rescoring_weight: 1.0              # [0.0..5.0]  0.0 collapses precision
+  reverse_weight:   0.0
+  nbest:            10
+  beam:             16.0
+  lattice_beam:     10.0
+```
+
+```yaml
+hotword:
+  hotword_path:          hotwords.txt   # relative to paths.testset_dir
+  fuzzy_threshold:       0.5            # [0.3, 0.5, 0.7]  CN phoneme cutoff
+  fuzzy_threshold_en:    0.5            # EN phoneme cutoff
+  max_append_path:       20             # corrected candidates fed into rescoring
+  use_confidence_reward: true           # CalculateMatchBonus scales by 1/avg_conf
+  context_score:         3.0            # hanzi context graph weight
+  enable_hotword_cache:  true           # LRU cache for streaming recurrence
+```
+
+```yaml
+autotune:
+  n_trials:         100                  # NSGA-II budget; resumes via study_db
+  sampler:          nsga2                # [nsga2, tpe]
+  cer_baseline:     14.20                # knee pick = max F1 with CER ≤ this
+  study_db:         runtime/libtorch/configs/default.study.db
+  tuned_config_out: runtime/libtorch/configs/default.tuned.yaml
+  pareto_out:       runtime/libtorch/configs/default.pareto.jsonl
+  eval_metrics_out: runtime/libtorch/configs/default.eval.txt
+```
+
+---
+
+## 📊 Results
+
+`u2pp_conformer-asr-cn-16k-online` on the AISHELL hotword test set (235 utts × 187 hotwords). The list is co-curated with the audio (232/235 utts contain ≥1 hotword by construction) — recall is an upper bound; see H_oov / I_indep below for the unaligned case.
+
+| Condition       | CER %  | recall % | precision % | F1 %  |
+|-----------------|-------:|---------:|------------:|------:|
+| A_baseline      |  14.20 |    15.96 |       97.83 | 27.44 |
+| B_phoneme       |  12.62 |    32.62 |       98.92 | 49.07 |
+| D_confidence    |  12.04 |    36.17 |       99.03 | 52.99 |
+| E_cache         |  12.04 |    36.17 |       99.03 | 52.99 |
+| D2_no_rescore   |  67.57 |    87.59 |       17.73 | 29.49 |
+| D3_high_rescore |  13.70 |    20.21 |       98.28 | 33.53 |
+| *G_wenet_native* | *10.97* | *46.45* |    *99.24* | *63.29* |
+| **F_autotune**  |  **8.37** |  **70.92** |   **99.50** | **82.82** |
+| *FG_stacked*    | *8.40* | *72.70* |     *97.62* | *83.33* |
+
+F_autotune = E_cache stack with the Optuna NSGA-II knee config from `tools/autotune.py` (tuned on aishell_test; held-out numbers below).
+
+G_wenet_native = fair-baseline comparator using upstream WeNet's character-level FST biasing alone (`--context_hanzi_path` + `context_score=3.0`, no corrector / no cache / no pinyin tables). It beats the hand-picked D_confidence anchor on every column, and F_autotune beats it back by +19.5 pp F1.
+
+FG_stacked = F_autotune's rescoring-time corrector stack layered on top of G_wenet_native's search-time FST bias. The two pathways are orthogonal (different pipeline stages), so stacking them is additive: +0.51 pp F1 on aishell_test, +0.55 pp F1 on I_indep. Precision dips ~1–2 pp because `context_score=3.0` is the upstream default and was not part of the NSGA-II search. See `HOTWORD_EVAL.md` *Head-to-head vs WeNet's native context-graph biasing*.
+
+Robustness under perturbed hotword inputs and AISHELL-1 hold-out audio:
+
+| Scenario                              | Condition    | recall % | precision % | spurious ins. |
+|---------------------------------------|--------------|---------:|------------:|--------------:|
+| Original 235 / 187 hot                | D_confidence |    36.17 |       99.03 |             1 |
+| Original 235 / 187 hot                | F_autotune   |    70.92 |       99.50 |             1 |
+| Original 235 / 187 hot                | FG_stacked   |    72.70 |       97.62 |             5 |
+| F_noisy (187 + 50 decoys)             | D_confidence |    36.17 |       99.03 |             1 |
+| G_partial (top-30)                    | D_confidence |    34.48 |      100.00 |             0 |
+| H_oov (2000 AISHELL-1 utts, no hot)   | D_confidence |        — |           — |             0 |
+| I_indep (115 AISHELL-1 utts, w/ hot)  | D_confidence |    48.15 |       98.48 |             1 |
+| I_indep (115 AISHELL-1 utts, w/ hot)  | F_autotune   |    79.26 |       99.07 |             1 |
+| I_indep (115 AISHELL-1 utts, w/ hot)  | FG_stacked   |    80.74 |       98.20 |             2 |
+
+Full write-up: `runtime/libtorch/eval_runs/HOTWORD_EVAL.md`.
+
+---
+
+## 📂 Project Structure
+
+```text
+wenet-main/
+├── runtime/
+│   ├── core/decoder/
+│   │   ├── corrector.{cc,h}             # PhonemeCorrector + fuzzy match + boost wiring
+│   │   ├── hotword_cache.{cc,h}         # LRU hotword cache with dynamic boost
+│   │   ├── context_graph.{cc,h}         # Aho-Corasick context-FST over unit table
+│   │   ├── asr_decoder.{cc,h}           # AppendPath / CalculateMatchBonus / TextToIds
+│   │   ├── search_interface.h           # shared by prefix-beam and WFST search
+│   │   └── params.h                     # gflags for the hotword surface
+│   └── libtorch/
+│       ├── configs/
+│       │   ├── default.yaml             # canonical decoder + hotword + autotune config
+│       │   ├── search_space.yaml        # Optuna search space
+│       │   ├── default.tuned.yaml       # knee-point config (written by autotune.py)
+│       │   ├── default.pareto.jsonl     # full Pareto front (written by autotune.py)
+│       │   ├── default.eval.txt         # held-out eval metrics (written by autotune.py)
+│       │   └── default.study.db         # Optuna SQLite study (resumable)
+│       └── eval_runs/
+│           ├── run_ablations.sh         # A → G reproducer (A → F additive ladder + G fair baseline)
+│           ├── HOTWORD_EVAL.md          # full evaluation write-up
+│           ├── summary.tsv              # per-condition metrics table
+│           └── {A..G}_*.{txt,log,metrics.txt}
+├── tools/
+│   ├── prepare_aishell_hotwords.sh      # ModelScope → wenet wav.scp + text + hotwords.txt
+│   ├── extract_aishell1_parquet.py      # HF aishell_1_zh_test parquet → wenet test set (H_oov / I_indep)
+│   ├── perturb_hotwords.py              # base hotwords → noisy (+decoys) / partial (top-k)
+│   ├── compute-hotword-metrics.py       # per-occurrence recall / precision / F1
+│   ├── compute-correction-impact.py     # fix / harm / shuffle classification
+│   ├── build_streaming_scp.py           # cluster utts by hotword → streaming order
+│   ├── autotune.py                      # Optuna multi-objective tuner (F1, CER) + held-out eval
+│   └── decoder_config.py                # YAML-backed dataclass config
+└── README_HOTWORD.md                    # this file
+```
+
+---
+
+## 🙏 Acknowledgements
+
+- **[WeNet](https://github.com/wenet-e2e/wenet)** — base ASR runtime; all non-hotword code paths are upstream.
+- **[cpp-pinyin](https://github.com/wolfgitpr/cpp-pinyin)** — runtime G2P used by `PhonemeCorrector`.
+- **[ModelScope `wenet/u2pp_conformer-asr-cn-16k-online`](https://www.modelscope.cn/models/wenet/u2pp_conformer-asr-cn-16k-online)** — AISHELL-trained U2++ Conformer.
+- **[ModelScope `speech_asr/speech_asr_aishell1_hotwords_testsets`](https://www.modelscope.cn/datasets/speech_asr/speech_asr_aishell1_hotwords_testsets)** — 235-utt AISHELL hotword test set.
+
+---
+
+## 📜 License
+
+Apache License 2.0, inherited from upstream WeNet.
