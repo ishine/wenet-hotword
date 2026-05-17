@@ -35,7 +35,9 @@ exp
 data
 raw_wav
 tensorboard
-**/*build*
+**/build/
+**/build-*/
+**/cmake-build-*/
 
 # CMake FetchContent download cache
 runtime/**/fc_base/
