@@ -60,6 +60,12 @@ struct DecodeOptions {
   CtcEndpointConfig ctc_endpoint_config;
   CtcPrefixBeamSearchOptions ctc_prefix_search_opts;
   CtcWfstBeamSearchOptions ctc_wfst_search_opts;
+
+  // When true, AppendPath() uses per-token CTC confidence to scale the
+  // hotword-correction bonus (correct_with_confidence). When false, falls
+  // back to the unweighted match score (correct). Used to ablate the
+  // "acoustic confidence reward" optimization.
+  bool use_confidence_reward = true;
 };
 
 struct WordPiece {
@@ -124,7 +130,10 @@ struct DecodeResource {
 
   std::shared_ptr<HotwordCache> hotword_cache;
 
-  int max_append_path = 0;
+  // Cap on the number of corrected candidates AppendPath() may append to the
+  // nbest. 0 disables the corrector candidate path entirely (the corrector
+  // still runs but its results are truncated away).
+  int max_append_path = 20;
 };
 
 // Torch ASR decoder

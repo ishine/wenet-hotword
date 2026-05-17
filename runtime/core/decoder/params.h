@@ -97,6 +97,10 @@ DEFINE_double(length_penalty, 0.0,
               "apply on self-loop arc, for balancing the del/ins ratio, "
               "suggest set to -3.0");
 DEFINE_int32(nbest, 10, "nbest for ctc wfst or prefix search");
+DEFINE_bool(use_confidence_reward, true,
+            "use per-token CTC confidence to scale the hotword-correction "
+            "bonus (correct_with_confidence). Set to false to ablate the "
+            "acoustic confidence reward and fall back to a uniform bonus.");
 
 // SymbolTable flags
 DEFINE_string(dict_path, "",
@@ -160,6 +164,7 @@ std::shared_ptr<DecodeOptions> InitDecodeOptionsFromFlags() {
   decode_config->ctc_wfst_search_opts.nbest = FLAGS_nbest;
   decode_config->ctc_prefix_search_opts.first_beam_size = FLAGS_nbest;
   decode_config->ctc_prefix_search_opts.second_beam_size = FLAGS_nbest;
+  decode_config->use_confidence_reward = FLAGS_use_confidence_reward;
   return decode_config;
 }
 
@@ -330,7 +335,7 @@ std::shared_ptr<DecodeResource> InitDecodeResourceFromFlags() {
       std::istringstream iss(context);
       PinyinHotword hw;
 
-      if (!(iss >> hw.text)) 
+      if (!(iss >> hw.text))
         continue;
 
       std::vector<std::string> fields;
@@ -338,12 +343,6 @@ std::shared_ptr<DecodeResource> InitDecodeResourceFromFlags() {
       while (iss >> token) {
         fields.push_back(token);
       }
-
-      if (FLAGS_enable_hotword_cache) {
-        resource->hotword_cache = std::make_shared<HotwordCache>(20, 2);
-      }
-
-      resource->max_append_path = FLAGS_max_append_path;
 
       if (fields.size() < 2) {
         // LOG(WARNING) << "Invalid hotword line: " << line;
@@ -357,11 +356,11 @@ std::shared_ptr<DecodeResource> InitDecodeResourceFromFlags() {
 
       hw.pinyins = fields;
       // LOG(INFO) << "The pinyins of the hotwords: " << hw.pinyins;
-      hotwords.push_back(hw);    
+      hotwords.push_back(hw);
       //contexts.emplace_back(Trim(context));
       }
 
-    
+
     ContextConfig config;
     config.context_score = FLAGS_context_score;
     resource->context_pinyin_graph = std::make_shared<ContextGraph>(config);
@@ -370,6 +369,15 @@ std::shared_ptr<DecodeResource> InitDecodeResourceFromFlags() {
             << " pinyin hotwords from " << FLAGS_context_pinyin_path;
     resource->context_pinyin_graph->BuildPinyinContextGraph(hotwords, resource->pinyin_unit_table, pinyin_mapper_);
     }
+  }
+
+  // AppendPath truncation cap and the streaming LRU hotword cache are tied to
+  // the phoneme corrector flow (not specifically to the pinyin context graph),
+  // so initialize them whenever the user enables corrections — independent of
+  // whether the pinyin context graph was built.
+  resource->max_append_path = FLAGS_max_append_path;
+  if (FLAGS_enable_hotword_cache) {
+    resource->hotword_cache = std::make_shared<HotwordCache>(20, 2);
   }
 
   if (!FLAGS_hotword_path.empty() && !FLAGS_pinyin_dict_path.empty()) {

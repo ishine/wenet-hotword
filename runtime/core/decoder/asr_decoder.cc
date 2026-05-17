@@ -202,9 +202,10 @@ void AsrDecoder::AppendPath() {
 
       for (const auto& path : result_) {
 
-      auto correction = corrector_->correct_with_confidence(
-        path.sentence,
-        path.token_log_probs);
+      auto correction = opts_.use_confidence_reward
+          ? corrector_->correct_with_confidence(path.sentence,
+                                                path.token_log_probs)
+          : corrector_->correct(path.sentence);
 
       const auto& all_matches = correction.matchs;
       if (all_matches.empty()) continue;

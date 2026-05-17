@@ -661,9 +661,13 @@ CorrectionResult PhonemeCorrector::correct_with_confidence(const std::string& te
             
             if (score >= current_threshold) {
                 float avg_conf = CalculateAvgConfidenceInRange(text, token_confidences, c_start, c_end);
-                float final_score = score + boost * 15;
-                matches.push_back({c_start, c_end, final_score, avg_conf, item.first});
-            } 
+                // The dynamic boost lowers `current_threshold` so cached hotwords get
+                // admitted at lower similarity. Do NOT add the boost into `final_score`
+                // — doing so makes a weak cached match (e.g. score 0.3) outrank a strong
+                // real match (score 0.95) in the score-sort below, which then occupies
+                // its span and starves the better candidate. See HOTWORD_EVAL.md.
+                matches.push_back({c_start, c_end, score, avg_conf, item.first});
+            }
         }
     }
 
