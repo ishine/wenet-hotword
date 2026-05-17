@@ -1,0 +1,12 @@
+#utts (ref):              235
+#utts missing from hyp:   0
+#hotword types:           185
+#hotword occurrences ref: 282
+#hotword occurrences hyp: 67
+  true positives:         67
+  misses:                 215
+  spurious insertions:    0
+recall      =  23.76 %
+precision   = 100.00 %
+F1          =  38.40 %
+char-loss   =  75.63 % (630/833 chars in hotword spans missed)

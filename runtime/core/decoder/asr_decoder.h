@@ -101,38 +101,15 @@ enum DecodeState {
 // DecodeResource is thread safe, which can be shared for multiple
 // decoding threads
 struct DecodeResource {
-  // std::shared_ptr<AsrModel> model = nullptr;
-  // std::shared_ptr<fst::SymbolTable> symbol_table = nullptr;
-  // std::shared_ptr<fst::VectorFst<fst::StdArc>> fst = nullptr;
-  // std::shared_ptr<fst::SymbolTable> unit_table = nullptr;
-  // std::shared_ptr<ContextGraph> context_graph = nullptr;
-  // std::shared_ptr<PostProcessor> post_processor = nullptr;
-
   std::shared_ptr<AsrModel> model = nullptr;
   std::shared_ptr<fst::SymbolTable> symbol_table = nullptr;
   std::shared_ptr<fst::VectorFst<fst::StdArc>> fst = nullptr;
   std::shared_ptr<fst::SymbolTable> unit_table = nullptr;
-  std::shared_ptr<fst::SymbolTable> pinyin_unit_table = nullptr;
-  std::shared_ptr<fst::SymbolTable> hanzi_unit_table = nullptr;
-  std::shared_ptr<PinyinMapper> pinyin_mapper = nullptr;
-  
-  // Hanzi-based graph for decoding
   std::shared_ptr<ContextGraph> context_hanzi_graph = nullptr;
-
-  // Pinyin-based graph for rescoring
-  std::shared_ptr<ContextGraph> context_pinyin_graph = nullptr;
-
   std::shared_ptr<PostProcessor> post_processor = nullptr;
-
   std::shared_ptr<HotwordCorrection::PhonemeCorrector> corrector = nullptr;
-
   std::shared_ptr<std::unordered_map<std::string, std::string>> oov_mapping;
-
   std::shared_ptr<HotwordCache> hotword_cache;
-
-  // Cap on the number of corrected candidates AppendPath() may append to the
-  // nbest. 0 disables the corrector candidate path entirely (the corrector
-  // still runs but its results are truncated away).
   int max_append_path = 20;
 };
 
@@ -180,37 +157,28 @@ class AsrDecoder {
   std::shared_ptr<AsrModel> model_;
   std::shared_ptr<PostProcessor> post_processor_;
   std::shared_ptr<ContextGraph> context_hanzi_graph_;
-  std::shared_ptr<ContextGraph> context_pinyin_graph_;
 
   std::shared_ptr<HotwordCorrection::PhonemeCorrector> corrector_;
   std::shared_ptr<HotwordCache> hotword_cache_;
-  
+
   std::shared_ptr<fst::VectorFst<fst::StdArc>> fst_ = nullptr;
-  // output symbol table
   std::shared_ptr<fst::SymbolTable> symbol_table_;
-  // e2e unit symbol table
   std::shared_ptr<fst::SymbolTable> unit_table_ = nullptr;
-  std::shared_ptr<PinyinMapper> pinyin_mapper_ = nullptr;
 
   std::shared_ptr<std::unordered_map<std::string, std::string>> oov_mapping_;
   const DecodeOptions& opts_;
-  // cache feature
   bool start_ = false;
-  // For continuous decoding
   int num_frames_ = 0;
   int global_frame_offset_ = 0;
-  const int time_stamp_gap_ = 100;  // timestamp gap between words in a sentence
+  const int time_stamp_gap_ = 100;
   int max_append_path = 20;
 
   std::unique_ptr<SearchInterface> searcher_;
   std::unique_ptr<CtcEndpoint> ctc_endpointer_;
 
-  // std::vector<std::vector<float>> global_ctc_log_probs_;
-
   int num_frames_in_current_chunk_ = 0;
   std::vector<DecodeResult> result_;
 
-  // for global CTC logits
   std::vector<std::vector<float>> global_ctc_log_probs_;
   std::vector<int> chunk_start_indices;
 

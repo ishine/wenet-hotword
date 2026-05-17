@@ -1,0 +1,5 @@
+condition	wall_s	CER%	recall%	precision%	F1%	TP	ref	hyp
+A_baseline	36	14.20	15.96	97.83	27.44	45	282	46
+B_phoneme	45	12.44	33.33	98.95	49.87	94	282	95
+D_confidence	44	12.02	36.17	99.03	52.99	102	282	103
+E_cache	43	12.04	36.17	99.03	52.99	102	282	103

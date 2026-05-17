@@ -30,16 +30,12 @@ namespace wenet {
                         std::shared_ptr<DecodeResource> resource,
                         const DecodeOptions& opts)
       : feature_pipeline_(std::move(feature_pipeline)),
-        // Make a copy of the model ASR model since we will change the inner
-        // status of the model
         model_(resource->model->Copy()),
         post_processor_(resource->post_processor),
-        context_pinyin_graph_(resource->context_pinyin_graph),
         context_hanzi_graph_(resource->context_hanzi_graph),
         corrector_(resource->corrector),
         hotword_cache_(resource->hotword_cache),
         symbol_table_(resource->symbol_table),
-        pinyin_mapper_(resource->pinyin_mapper),
         fst_(resource->fst),
         unit_table_(resource->unit_table),
         oov_mapping_(resource->oov_mapping),
@@ -47,7 +43,6 @@ namespace wenet {
         max_append_path(resource->max_append_path),
         ctc_endpointer_(new CtcEndpoint(opts.ctc_endpoint_config)) {
     if (opts_.reverse_weight > 0) {
-      // Check if model has a right to left decoder
       CHECK(model_->is_bidirectional_decoder());
     }
 
@@ -59,7 +54,7 @@ namespace wenet {
                                             resource->context_hanzi_graph));
     }
 
-    VLOG(1) << "Current searcher type: " 
+    VLOG(1) << "Current searcher type: "
           << (dynamic_cast<CtcWfstBeamSearch*>(searcher_.get()) ? "WFST" : "PrefixBeam");
 
     ctc_endpointer_->frame_shift_in_ms(frame_shift_in_ms());

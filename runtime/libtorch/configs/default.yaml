@@ -1,0 +1,85 @@
+# Default hotword-pipeline decoder configuration.
+#
+# Consumed by `tools/autotune.py` and translatable into a `decoder_main`
+# command line. Values here reproduce the `D_confidence` row of
+# `runtime/libtorch/eval_runs/HOTWORD_EVAL.md` on the AISHELL hotword test
+# set with `u2pp_conformer-asr-cn-16k-online`.
+#
+# To tune for a different model / dataset:
+#   1. Copy this file to e.g. `my_model.yaml` and edit `paths` + `name`.
+#   2. Either edit knobs directly, or run
+#      `python3 tools/autotune.py --config my_model.yaml \
+#                                 --search-space configs/search_space.yaml`
+#      which will persist the best-scoring config back to `my_model.tuned.yaml`.
+#
+# The active YAML schema is mirrored by the dataclasses in
+# `tools/decoder_config.py`; if you add a knob, mirror it there.
+
+name: default                                  # used as default OUT_DIR prefix
+
+paths:
+  decoder_bin: runtime/libtorch/build/bin/decoder_main
+  model_dir: ~/userspace/wenet/models/u2pp_conformer-asr-cn-16k-online
+  testset_dir: ~/userspace/wenet/aishell_test
+  # Held-out test set for the post-tune eval pass. Leave empty to skip.
+  # The default set (I_indep in HOTWORD_EVAL.md) shares the hotword list with
+  # testset_dir but uses disjoint audio, so generalization is measurable.
+  eval_testset_dir: ~/userspace/wenet/aishell1_indep_hotword
+  # cpp-pinyin dictionary directory; built alongside decoder_main.
+  pinyin_dict_dir: runtime/libtorch/build/bin/dict
+  out_dir: runtime/libtorch/eval_runs
+
+decode:
+  chunk_size: -1                             # [-1, 16, 32, 64]  -1 = non-streaming
+  num_left_chunks: -1
+  ctc_weight: 0.5                            # CTC vs attention mix at rescoring
+  rescoring_weight: 1.0                      # [0.0..5.0]  0.0 = no rescoring (collapse)
+  reverse_weight: 0.0
+  nbest: 10
+  beam: 16.0                                 # CTC-WFST beam (TLG path; unused without fst_path)
+  lattice_beam: 10.0
+  acoustic_scale: 1.0
+  blank_skip_thresh: 1.0
+  length_penalty: 0.0
+  max_active: 7000
+  min_active: 200
+
+hotword:
+  # Phoneme corrector (the headline gain). Disable by clearing hotword_path.
+  hotword_path: hotwords.txt                 # resolved against paths.testset_dir
+  fuzzy_threshold: 0.5                       # [0.3, 0.5, 0.7]  CN phoneme edit-ratio cutoff
+  fuzzy_threshold_en: 0.5                    # [0.3, 0.5, 0.7]  EN phoneme cutoff
+  max_append_path: 20                        # how many corrected candidates feed rescoring
+  use_confidence_reward: true                # CalculateMatchBonus scales by 1/avg_conf
+
+  # Upstream WeNet character-FST biasing weight (used when --context_hanzi_path
+  # is set; see G_wenet_native condition in run_ablations.sh).
+  context_score: 3.0                         # [1.0, 3.0, 5.0]
+
+  # LRU hotword cache. Designed for streaming (recurring hotwords); a no-op
+  # on IID tests.
+  enable_hotword_cache: true
+
+runtime:
+  thread_num: 0                              # 0 = auto (use nproc)
+  warmup: 0
+  simulate_streaming: false
+
+autotune:
+  # Multi-objective (F1↑, CER↓) Pareto search via Optuna.
+  n_trials: 100                              # trial budget per study (resumes if study_db exists)
+  sampler: nsga2                             # [nsga2, tpe]
+  random_seed: 0
+  # CER ceiling for the knee pick: take the highest-F1 Pareto trial whose CER
+  # stays under this value. Default ~ A_baseline CER on AISHELL hotword.
+  cer_baseline: 14.20
+  study_name: default
+  # Persistence (relative to repo root). The study_db is the source of truth;
+  # delete it to restart, keep it to resume / extend.
+  study_db: runtime/libtorch/configs/default.study.db
+  # Knee-point config (what the rest of the pipeline reads).
+  tuned_config_out: runtime/libtorch/configs/default.tuned.yaml
+  # Full Pareto frontier for offline inspection.
+  pareto_out: runtime/libtorch/configs/default.pareto.jsonl
+  # Held-out eval metrics for the knee config.
+  eval_metrics_out: runtime/libtorch/configs/default.eval.txt

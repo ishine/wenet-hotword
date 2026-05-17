@@ -54,3 +54,6 @@ runtime/core/grpc/wenet.pb.h
 # Clangd files
 .cache
 compile_commands.json
+
+# Hotword ablation tee captures (zero-byte stderr mirrors)
+runtime/libtorch/eval_runs/**/*.log

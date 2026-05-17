@@ -109,19 +109,9 @@ DEFINE_string(unit_path, "",
               "e2e model unit symbol table, it is used in both "
               "with/without LM scenarios for context/timestamp");
 
-DEFINE_string(pinyin_unit_path, "",
-              "context graph pinyin unit symbol table, it is used in both "
-              "with/without LM scenarios for context/timestamp");
-DEFINE_string(hanzi_unit_path, "",
-              "context graph hanzi unit symbol table, it is used in both "
-              "with/without LM scenarios for context/timestamp");
-DEFINE_string(hanzi_pinyin_path, "",
-              "context graph hanzi unit symbol table, it is used in both "
-              "with/without LM scenarios for context/timestamp");
 DEFINE_string(cmu_dict_path, "", "path to CMU dictionary (cmudict.dict) for English G2P");
 // Context flags
 DEFINE_string(context_hanzi_path, "", "context path, is used to build hanzi-based context graph");
-DEFINE_string(context_pinyin_path, "", "context path, is used to build pinyin-based context graph");
 DEFINE_double(context_score, 3.0, "is used to rescore the decoded result");
 DEFINE_double(fuzzy_threshold, 0.5, "text2text correction threshold");
 DEFINE_double(fuzzy_threshold_en, 0.5, "text2text EN correction threshold");
@@ -231,36 +221,6 @@ std::shared_ptr<DecodeResource> InitDecodeResourceFromFlags() {
   CHECK(unit_table != nullptr);
   resource->unit_table = unit_table;
 
-  // Hanzi/pinyin tables and the hanzi→pinyin mapper are only required by the
-  // pinyin-based hotword context graph. Loading them is optional so that plain
-  // CTC/attention ASR (and hanzi-only hotwords) still works without these
-  // auxiliary tables.
-  std::shared_ptr<PinyinMapper> pinyin_mapper_;
-  if (!FLAGS_hanzi_unit_path.empty()) {
-    LOG(INFO) << "Reading hanzi unit table " << FLAGS_hanzi_unit_path;
-    auto hanzi_table = std::shared_ptr<fst::SymbolTable>(
-        fst::SymbolTable::ReadText(FLAGS_hanzi_unit_path));
-    CHECK(hanzi_table != nullptr);
-    resource->hanzi_unit_table = hanzi_table;
-  }
-  if (!FLAGS_pinyin_unit_path.empty()) {
-    LOG(INFO) << "Reading pinyin unit table " << FLAGS_pinyin_unit_path;
-    auto pinyin_table = std::shared_ptr<fst::SymbolTable>(
-        fst::SymbolTable::ReadText(FLAGS_pinyin_unit_path));
-    CHECK(pinyin_table != nullptr);
-    resource->pinyin_unit_table = pinyin_table;
-  }
-  if (resource->hanzi_unit_table && resource->pinyin_unit_table &&
-      !FLAGS_hanzi_pinyin_path.empty()) {
-    pinyin_mapper_ = std::make_shared<PinyinMapper>();
-    pinyin_mapper_->LoadCharToPinyin(
-        *resource->hanzi_unit_table,
-        *resource->pinyin_unit_table,
-        FLAGS_hanzi_pinyin_path);
-    resource->pinyin_mapper = pinyin_mapper_;
-  }
-
-
   if (!FLAGS_fst_path.empty()) {  // With LM
     CHECK(!FLAGS_dict_path.empty());
     LOG(INFO) << "Reading fst " << FLAGS_fst_path;
@@ -312,69 +272,14 @@ std::shared_ptr<DecodeResource> InitDecodeResourceFromFlags() {
     ContextConfig config;
     config.context_score = FLAGS_context_score;
     resource->context_hanzi_graph = std::make_shared<ContextGraph>(config);
-    resource->context_hanzi_graph->BuildContextGraph(contexts, 
+    resource->context_hanzi_graph->BuildContextGraph(contexts,
                                                     resource->oov_mapping,
                                                     unit_table);
   }
 
-  // Build Pinyin-based graph for Rescoring
-  if (!FLAGS_context_pinyin_path.empty()) {
-    if (!resource->pinyin_unit_table || !resource->pinyin_mapper) {
-      LOG(WARNING) << "context_pinyin_path is set but pinyin_unit_path / "
-                      "hanzi_pinyin_path are missing; skipping pinyin "
-                      "context graph.";
-    } else {
-    LOG(INFO) << "Reading context " << FLAGS_context_pinyin_path;
-    std::vector<std::string> contexts;
-    std::ifstream infile(FLAGS_context_pinyin_path);
-    std::string context;
-    std::vector<PinyinHotword> hotwords;
-    std::string line;
-    while (getline(infile, context)) {
-      if (context.empty() || context[0] == '#') continue;
-      std::istringstream iss(context);
-      PinyinHotword hw;
-
-      if (!(iss >> hw.text))
-        continue;
-
-      std::vector<std::string> fields;
-      std::string token;
-      while (iss >> token) {
-        fields.push_back(token);
-      }
-
-      if (fields.size() < 2) {
-        // LOG(WARNING) << "Invalid hotword line: " << line;
-        continue;
-      }
-      // LOG(INFO) << "The text of the hotwords: " << hw.text;
-
-      hw.score = std::stof(fields.back());
-      // LOG(INFO) << "The score of the hotwords: " << hw.score;
-      fields.pop_back();
-
-      hw.pinyins = fields;
-      // LOG(INFO) << "The pinyins of the hotwords: " << hw.pinyins;
-      hotwords.push_back(hw);
-      //contexts.emplace_back(Trim(context));
-      }
-
-
-    ContextConfig config;
-    config.context_score = FLAGS_context_score;
-    resource->context_pinyin_graph = std::make_shared<ContextGraph>(config);
-    //resource->context_graph->BuildContextGraph(contexts, unit_table);
-    LOG(INFO) << "Loaded " << hotwords.size()
-            << " pinyin hotwords from " << FLAGS_context_pinyin_path;
-    resource->context_pinyin_graph->BuildPinyinContextGraph(hotwords, resource->pinyin_unit_table, pinyin_mapper_);
-    }
-  }
-
   // AppendPath truncation cap and the streaming LRU hotword cache are tied to
-  // the phoneme corrector flow (not specifically to the pinyin context graph),
-  // so initialize them whenever the user enables corrections — independent of
-  // whether the pinyin context graph was built.
+  // the phoneme corrector flow, so initialize them whenever corrections are
+  // enabled.
   resource->max_append_path = FLAGS_max_append_path;
   if (FLAGS_enable_hotword_cache) {
     resource->hotword_cache = std::make_shared<HotwordCache>(20, 2);
@@ -428,9 +333,6 @@ std::shared_ptr<DecodeResource> InitDecodeResourceFromFlags() {
       resource->post_processor = postprocessor;
     }
   }
-
-  // Init plate corrector
-  // (车牌纠错链路已下线 — 仅保留 PhonemeCorrector / 拼音 context graph 三条主路径)
 
   return resource;
 }

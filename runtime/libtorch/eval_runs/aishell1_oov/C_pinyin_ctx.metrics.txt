@@ -1,0 +1,11 @@
+#utts (ref):              2000
+#utts missing from hyp:   0
+#hotword types:           185
+#hotword occurrences ref: 0
+#hotword occurrences hyp: 0
+  true positives:         0
+  misses:                 0
+  spurious insertions:    0
+recall      =   0.00 %
+precision   =   0.00 %
+F1          =   0.00 %

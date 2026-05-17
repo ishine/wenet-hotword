@@ -1,0 +1,48 @@
+# Search space for the hotword-pipeline autotuner.
+#
+# Consumed by `tools/autotune.py`. Each entry is a `dotted.path: { ... }`
+# mapping into `default.yaml`'s nested keys; the autotuner translates it into
+# Optuna `trial.suggest_*` calls.
+#
+# Supported entry types:
+#   { type: float,       low: <num>, high: <num>, step: <num?>, log: <bool?> }
+#   { type: int,         low: <int>, high: <int>, step: <int?> }
+#   { type: categorical, choices: [...] }
+#
+# Sampler is NSGA-II (multi-objective F1↑, CER↓) — see autotune.sampler in
+# default.yaml. The search space stays in the regime that ablations have
+# already shown to matter; widen ranges only after a sweep flatlines.
+
+space:
+  # --- rescoring (the load-bearing axis) ---
+  decode.rescoring_weight:
+    type: float
+    low: 0.3
+    high: 2.5
+  decode.ctc_weight:
+    type: float
+    low: 0.2
+    high: 0.8
+  decode.reverse_weight:
+    type: float
+    low: 0.0
+    high: 0.5
+  decode.length_penalty:
+    type: float
+    low: -1.0
+    high: 1.0
+  decode.nbest:
+    type: categorical
+    choices: [5, 10, 20]
+
+  # --- hotword pathway ---
+  hotword.fuzzy_threshold:
+    type: float
+    low: 0.3
+    high: 0.7
+  hotword.max_append_path:
+    type: categorical
+    choices: [10, 20, 40]
+  hotword.use_confidence_reward:
+    type: categorical
+    choices: [true, false]

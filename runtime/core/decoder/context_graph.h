@@ -32,9 +32,16 @@ using ArcIterator = fst::ArcIterator<fst::StdFst>;
 using Matcher = fst::SortedMatcher<fst::StdFst>;
 using Weight = fst::StdArc::Weight;
 
-bool SplitContextToUnits(const std::string& context,
-                         const std::shared_ptr<fst::SymbolTable>& unit_table,
-                         std::vector<int>* units);
+// Splits a UTF-8 context string into unit_table ids. When oov_mapping is
+// non-null, characters missing from unit_table are routed through their
+// homophone proxies before being declared OOV. Returns true iff every
+// character mapped successfully.
+bool SplitContextToUnits(
+    const std::string& context,
+    const std::shared_ptr<fst::SymbolTable>& unit_table,
+    std::vector<int>* units,
+    const std::shared_ptr<std::unordered_map<std::string, std::string>>&
+        oov_mapping = nullptr);
 
 struct ContextConfig {
   int max_contexts = 5000;
@@ -43,99 +50,38 @@ struct ContextConfig {
   float incremental_context_score = 0.0;
 };
 
-//近音拼音表
-static const std::unordered_map<std::string,
-                                std::vector<std::string>> kFuzzyPinyinMap = {
-  {"zhi", {"zi", "shi"}},
-  {"zi",  {"zhi"}},
-  {"shi", {"zhi"}},
-
-  {"zhang", {"zang"}},
-  {"zang", {"zhang"}},
-
-  {"cheng", {"ceng"}},
-  {"ceng", {"cheng"}},
-
-  {"shang", {"sang"}},
-  {"sang", {"shang"}},
-
-  {"ren", {"len"}},
-  {"len", {"ren"}},
-
-  {"fan", {"han"}},
-  {"han", {"fan"}},
-  {"ye", {"mian"}},
-  {"tu", {"fu"}},
-
-  // 可控扩展，不要太多
-};
-
-struct PinyinHotword {
-  std::string text;        // 汉字（可选，仅用于记录）
-  std::vector<std::string> pinyins;  // {"zhi","fu","bao"}
-  float score;             // 热词权重
-};
-
-class PinyinMapper {
- public:
-  // 构造函数：加载拼音映射表
-  //explicit PinyinMapper(const std::shared_ptr<fst::SymbolTable>& unit_table) 
-  //    : unit_table_(unit_table) {}
-  PinyinMapper() = default;
-   // 从 hanzi_pinyin.txt 构建映射
-  void LoadCharToPinyin(
-      const fst::SymbolTable& hanzi_table,
-      const fst::SymbolTable& pinyin_table,
-      const std::string& dict_path);
-  //汉字 unit_id → 拼音 unit_id(s)
-  bool CharToPinyinUnits(int hanzi_unit,
-                         std::vector<int>* pinyin_units) const;
-  // 加载映射表
-  void AddMapping(int hanzi_unit, const std::vector<std::string>& pys);
-
- private:
-  //std::shared_ptr<fst::SymbolTable> unit_table_;
-  // 核心映射表
-  // key: hanzi unit_id
-  // val: pinyin unit_id list (多音字)
-  std::unordered_map<int, std::vector<int>> char2pinyin_; // hanzi_unit -> 拼音 unit_id
-};
-
+// Aho-Corasick context-biasing FST over the acoustic-model unit table.
+// Built once from a list of hotword strings; queried per CTC search step
+// via GetNextState to accumulate arc weights along matched prefixes.
 class ContextGraph {
  public:
   explicit ContextGraph(ContextConfig config);
-  int TraceContext(int cur_state, int unit_id, int* final_state);
-  void BuildContextGraph(const std::vector<std::string>& context,
-                         const std::shared_ptr<std::unordered_map<std::string, std::string>>& oov_mapping,
-                         const std::shared_ptr<fst::SymbolTable>& unit_table);
 
-  void BuildContextGraph(const std::vector<std::string>& context,
+  // Upstream-compatible builder: hotword strings, unit table only.
+  void BuildContextGraph(const std::vector<std::string>& contexts,
                          const std::shared_ptr<fst::SymbolTable>& unit_table);
-  //void BuildPinyinContextGraph(
-  //  const std::vector<PinyinHotword>& hotwords,
-  //  const fst::SymbolTable& unit_table);
-  
-  void BuildPinyinContextGraph(
-    const std::vector<PinyinHotword>& hotwords,
-    const std::shared_ptr<fst::SymbolTable>& unit_table,
-    const std::shared_ptr<PinyinMapper>& pinyin_mapper);
+  // Same as above plus an OOV → homophone-proxy mapping for hotwords whose
+  // characters fall outside unit_table.
+  void BuildContextGraph(
+      const std::vector<std::string>& contexts,
+      const std::shared_ptr<std::unordered_map<std::string, std::string>>&
+          oov_mapping,
+      const std::shared_ptr<fst::SymbolTable>& unit_table);
+
+  int TraceContext(int cur_state, int unit_id, int* final_state);
   void ConvertToAC();
+
   int GetNextState(int cur_state, int unit_id, float* score,
                    std::unordered_set<std::string>* contexts = nullptr);
-  int GetNextState(int cur_state, int unit_id, float* score, int* current_match_length,
-                   std::unordered_set<std::string>* contexts = nullptr);
-  int GetNextState(int cur_state, int unit_id, float* score,float* r_score,
-                   std::unordered_set<std::string>* contexts = nullptr);
-  // check context state is the final state
+
   bool IsFinalState(int state) {
     return graph_->Final(state) != Weight::Zero();
   }
 
  private:
   ContextConfig config_;
-  std::shared_ptr<PinyinMapper> pinyin_mapper_ = nullptr;
   std::unique_ptr<fst::StdVectorFst> graph_;
-  std::unordered_map<int, int> fallback_finals_;  // States fallback to final
+  std::unordered_map<int, int> fallback_finals_;        // States fallback to final
   std::unordered_map<int, std::string> context_table_;  // Finals to context
 };
 
