@@ -20,8 +20,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-// #include "vad/include/fsmn-vad.h"
-// #include "punc/punc.h"
 #include "decoder/asr_decoder.h"
 #include "decoder/corrector.h"
 #ifdef USE_ONNX
@@ -48,9 +46,6 @@
 
 DEFINE_int32(device_id, 0, "set XPU DeviceID for ASR model");
 
-//Vad moulde init flags
-DEFINE_string(vad_path, "", "exported vad parameters path");
-DEFINE_string(punc_path, "", "exported vad parameters path"); 
 // TorchAsrModel flags
 DEFINE_string(model_path, "", "pytorch exported model path");
 // OnnxAsrModel flags
@@ -65,9 +60,6 @@ DEFINE_string(bpu_model_dir, "",
 DEFINE_string(openvino_dir, "", "directory where the OV model is saved");
 DEFINE_int32(core_number, 1, "Core number of process");
 
-//Vad moulde init flags
-DEFINE_bool(use_vad,true, "vad or not for streaming asr");
-DEFINE_double(vad_max_sentence_second, 15.0f, "max sentence durations for vad segs");
 // FeaturePipelineConfig flags
 DEFINE_int32(num_bins, 80, "num mel bins for fbank feature");
 DEFINE_int32(sample_rate, 16000, "sample rate for audio");
@@ -141,30 +133,6 @@ DEFINE_string(hotword_path, "", "path to hotword file for correction");
 DEFINE_string(pinyin_dict_path, "", "path to cpp-pinyin dictionary");
 
 DEFINE_string(oov_mapping_path, "", "path to OOV mapping file");
-
-// namespace wenet {
-// std::shared_ptr<funasr::VadConfig> InitVadConfigFromFlags() {
-//   auto vad_config = std::make_shared<funasr::VadConfig>(
-//       FLAGS_vad_path.c_str(),FLAGS_sample_rate,FLAGS_vad_max_sentence_second,FLAGS_use_vad);
-//   int stats = vad_config->Init(FLAGS_vad_path.c_str());
-//   return vad_config;
-// }
-
-// std::shared_ptr<Punc::PuncConfig> InitPuncConfigFromFlags() {
-//   CHECK(!FLAGS_punc_path.empty());
-//   LOG(INFO) << "Reading punc config: " << FLAGS_punc_path.c_str();
-//   auto punc_config = std::make_shared<Punc::PuncConfig>(
-//       FLAGS_punc_path.c_str());
-//   bool stats = punc_config->Init(FLAGS_punc_path.c_str());
-//   return punc_config;
-// }
-	
-// std::shared_ptr<FeaturePipelineConfig> InitFeaturePipelineConfigFromFlags() {
-//   // LOG(INFO) << "Reading vad params config: " << FLAGS_vad_path;	
-//   auto feature_config = std::make_shared<FeaturePipelineConfig>(
-//       FLAGS_num_bins, FLAGS_sample_rate);
-//   return feature_config;
-// }
 
 namespace wenet {
 std::shared_ptr<FeaturePipelineConfig> InitFeaturePipelineConfigFromFlags() {

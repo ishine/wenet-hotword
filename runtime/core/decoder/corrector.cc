@@ -251,26 +251,6 @@ bool EnglishProvider::get_phonemes(const std::string& word, std::vector<std::str
     return false;
 }
 
-// size_t process_en_num(const std::string& text, size_t pos, std::vector<Phoneme>& seq, bool split_char) {
-//     size_t start_pos = pos; size_t len = text.length();
-//     while (pos < len) {
-//         char c = text[pos];
-//         if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))) break;
-//         pos++;
-//     }
-//     size_t end_pos = pos;
-//     std::string token = text.substr(start_pos, end_pos - start_pos);
-//     std::string token_lower = token;
-//     std::transform(token_lower.begin(), token_lower.end(), token_lower.begin(), ::tolower);
-//     Lang lang = (!token_lower.empty() && std::isdigit(token_lower[0])) ? Lang::NUM : Lang::EN;
-//     if (split_char) {
-//         for (size_t i = 0; i < token.length(); ++i) {
-//             seq.push_back({std::string(1, token_lower[i]), lang, (i == 0), (i == token.length() - 1), start_pos + i, start_pos + i + 1});
-//         }
-//     } else { seq.push_back({token_lower, lang, true, true, start_pos, end_pos}); }
-//     return end_pos;
-// }
-
 
 size_t process_en_num(const std::string& text, size_t pos, std::vector<Phoneme>& seq, bool split_char) {
     size_t start_pos = pos; size_t len = text.length();
@@ -450,7 +430,7 @@ std::vector<std::tuple<float, int, int>> fuzzy_substring_search_constrained_with
     const std::vector<float>& token_confidences,  
     float confidence_threshold                  
 ) {
-	int n = hw_info.size(); int m = input_info.size();
+    int n = hw_info.size(); int m = input_info.size();
     if (n == 0 || m == 0) return {};
 
     std::vector<std::vector<float>> dp(n + 1, std::vector<float>(m + 1, std::numeric_limits<float>::infinity()));
@@ -467,7 +447,7 @@ std::vector<std::tuple<float, int, int>> fuzzy_substring_search_constrained_with
             float base_cost = _get_tuple_cost(hw_info[i - 1], input_info[j - 1]);
             float weighted_cost = base_cost;
 
-		    if (!token_confidences.empty() && j-1 < token_confidences.size()) {
+            if (!token_confidences.empty() && j-1 < token_confidences.size()) {
                 float confidence = std::exp(token_confidences[j-1]);
                     float weight = 0.2f + 0.8f * confidence;
                     weight = std::max(0.1f, std::min(1.0f, weight));                    
@@ -530,19 +510,6 @@ void PhonemeIndex::add(const std::string& hotword, const std::vector<Phoneme>& p
     if (phonemes[0].lang == Lang::EN) { size_t limit = std::min(codes.size(), (size_t)2); for(size_t k=0; k<limit; ++k) indices.push_back(k); }
     for (int idx : indices) if (idx < (int)codes.size()) index[codes[idx]].push_back({hotword, codes});
 }
-// std::vector<std::pair<std::string, std::vector<int>>> PhonemeIndex::get_candidates(const std::vector<Phoneme>& input_phonemes) {
-//     std::unordered_set<int> input_codes;
-//     for (const auto& p : input_phonemes) {
-//         input_codes.insert(encoder.encode(p.value));
-//         if (p.lang == Lang::ZH) { for (const auto& s : SIMILAR_PHONEMES) { if (s.count(p.value)) for (const auto& v : s) input_codes.insert(encoder.encode(v)); } }
-//     }
-//     std::vector<std::pair<std::string, std::vector<int>>> candidates;
-//     std::unordered_set<std::string> seen;
-//     for (int code : input_codes) {
-//         if (index.count(code)) for (const auto& item : index[code]) { if (seen.find(item.first) == seen.end()) { candidates.push_back(item); seen.insert(item.first); } }
-//     }
-//     return candidates;
-// }
 
 std::vector<std::pair<std::string, std::vector<int>>> PhonemeIndex::get_candidates(const std::vector<Phoneme>& input_phonemes) {
     std::unordered_set<int> input_codes;
@@ -615,21 +582,6 @@ PhonemeCorrector::PhonemeCorrector(float threshold, float threshold_en) : thresh
     this->similar_threshold = threshold - 0.2f;
     fast_rag = std::make_unique<FastRAG>(std::min(threshold, similar_threshold) - 0.1f);
 }
-
-// void PhonemeCorrector::update_hotwords(const std::string& hotword_text) {
-//     std::stringstream ss(hotword_text); std::string line;
-//     std::unordered_map<std::string, std::vector<Phoneme>> new_hotwords;
-//     LOG(INFO) << "corrector start to update hotwords";
-//     while (std::getline(ss, line)) {
-//         line.erase(0, line.find_first_not_of(" \t\r\n")); line.erase(line.find_last_not_of(" \t\r\n") + 1);
-//         if (line.empty() || line[0] == '#') continue;
-//         std::vector<Phoneme> phons = get_phoneme_info(line);
-//         if (!phons.empty()) new_hotwords[line] = phons;
-//     }
-//     std::lock_guard<std::mutex> guard(_lock);
-//     hotwords = new_hotwords; fast_rag->add_hotwords(hotwords);
-//     LOG(INFO) << "Loaded " << hotwords.size() << " hotwords.";
-// }
 
 void PhonemeCorrector::update_hotwords(const std::string& hotword_text) {
     std::stringstream ss(hotword_text);

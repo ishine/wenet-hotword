@@ -147,21 +147,6 @@ bool SplitContextToUnits(const std::string& context,
 
 ContextGraph::ContextGraph(ContextConfig config) : config_(config) {}
 
-
-//void PinyinMapper::AddMapping(int hanzi_unit,
-//                              const std::vector<std::string>& pys) {
-//  std::vector<int> units;
-//  for (const auto &py : pys) {
-//    int py_unit = unit_table_->Find(py);
-//    if (py_unit != fst::kNoSymbol) {
-//      units.push_back(py_unit);
-//    }
-//  }
-//  if (!units.empty()) {
-//    char2pinyin_[hanzi_unit] = units;
-//  }
-//}
-
 void PinyinMapper::LoadCharToPinyin(
     const fst::SymbolTable& hanzi_table,
     const fst::SymbolTable& pinyin_table,
@@ -286,57 +271,6 @@ void ContextGraph::BuildPinyinContextGraph(
   ConvertToAC();
 }
 
-//原拼音 arc
-//void ContextGraph::BuildPinyinContextGraph(
-//    const std::vector<PinyinHotword>& hotwords,
-//    const fst::SymbolTable& unit_table) {
-//
-//  //构建原始 FST
-//  std::unique_ptr<fst::StdVectorFst> raw_fst(
-//      new fst::StdVectorFst());
-//
-//  int start_state = raw_fst->AddState();
-//  raw_fst->SetStart(start_state);
-//
-//  for (const auto& hw : hotwords) {
-//    int cur_state = start_state;
-//
-//    for (size_t i = 0; i < hw.pinyins.size(); ++i) {
-//      const std::string& py = hw.pinyins[i];
-//      int py_unit = unit_table.Find(py);
-//      if (py_unit == fst::kNoSymbol) {
-//        LOG(WARNING) << "Skip hotword, unknown pinyin: " << py;
-//        cur_state = -1;
-//        break;
-//      }
-//
-//      int next_state = raw_fst->AddState();
-//
-//      //加分策略：越靠后，权重越大（防止前缀误触发）
-//      float arc_score =
-//          hw.score + i * config_.incremental_context_score;
-//
-//      raw_fst->AddArc(
-//          cur_state,
-//          fst::StdArc(py_unit, py_unit, arc_score, next_state));
-//
-//      cur_state = next_state;
-//    }
-//
-//    if (cur_state >= 0) {
-//      raw_fst->SetFinal(cur_state, fst::StdArc::Weight::One());
-//      context_table_[cur_state] = hw.text;  // 记录命中的热词
-//    }
-//  }
-//
-//  //确定化（合并公共前缀）
-//  graph_.reset(new fst::StdVectorFst());
-//  fst::Determinize(*raw_fst, graph_.get());
-//
-//  //转成 Aho–Corasick 自动机（fallback）
-//  ConvertToAC();
-//}
-
 
 void ContextGraph::BuildContextGraph(
     const std::vector<std::string>& contexts,
@@ -456,58 +390,6 @@ void ContextGraph::ConvertToAC() {
   // matcher
   fst::ArcSort(graph_.get(), fst::ILabelCompare<fst::StdArc>());
 }
-
-// int ContextGraph::GetNextState(
-//     int cur_state,
-//     int unit_id,           // 汉字 token id
-//     float* score,
-//     std::unordered_set<std::string>* contexts) {
-
-//   CHECK_GE(cur_state, 0);
-//   CHECK_NE(unit_id, 0);
-
-//   Matcher matcher(*graph_, fst::MATCH_INPUT);
-//   matcher.SetState(cur_state);
-//   // pinyin_mapper_ = std::make_unique<PinyinMapper>(); 
-//   // ---------- 1) 直接拼音精确匹配 -------------
-//   std::vector<int> pinyin_units;
-//   bool has_pinyin = pinyin_mapper_->CharToPinyinUnits(unit_id, &pinyin_units);
-
-//   if (has_pinyin) {
-//     // 对每个可能的拼音版本去匹配 FST
-//     for (int py_unit : pinyin_units) {
-//       matcher.SetState(cur_state);
-//       if (matcher.Find(py_unit)) {
-//         const fst::StdArc& arc = matcher.Value();
-//         int next_state = arc.nextstate;
-
-//         // prefix reward（小）
-//         *score += arc.weight.Value();
-
-//         // final？
-//         if (contexts && graph_->Final(next_state) != Weight::Zero()) {
-//           contexts->insert(context_table_[next_state]);
-//         }
-
-//         // 到了叶子 reset
-//         if (graph_->NumArcs(next_state) == 0) {
-//           return 0;
-//         }
-//         return next_state;
-//       }
-//     }
-//   }
-
-//   // -------- 2) fallback（不加分） -------------
-//   ArcIterator aiter(*graph_, cur_state);
-//   const fst::StdArc& fallback_arc = aiter.Value();
-//   if (fallback_arc.ilabel == 0) {
-//     int next_state = fallback_arc.nextstate;
-//     return GetNextState(next_state, unit_id, score, contexts);
-//   }
-
-//   return 0;
-// }
 
 int ContextGraph::GetNextState(
     int cur_state,
