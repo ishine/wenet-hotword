@@ -1,4 +1,4 @@
-# wenet-main 集成说明（含热词增强 / Pinyin 上下文图 / 车牌纠错）
+# wenet-main 集成说明（含热词增强 / Pinyin 上下文图 / 流式热词缓存）
 
 本文档记录把用户 `core/` 目录的 C++ 代码并入 `wenet-main/runtime/` 之后，相对上游 WeNet 做了哪些修改、为什么这么改、以及怎么编译运行。
 
@@ -39,23 +39,22 @@ core/
 |------|------|
 | `corrector.cc / corrector.h` | `HotwordCorrection` 命名空间：`PhonemeCorrector`、`FastRAG`、`PhonemeIndex`、`PinyinSplitter`、`PinyinProvider`、`EnglishProvider`、模糊音素匹配（`CONFUSION_MATRIX`、`fuzzy_substring_search_constrained_with_confidence`）。负责把 ASR 输出片段按拼音/英文音素去比对热词，做错误更正。 |
 | `hotword_cache.cc / hotword_cache.h` | `wenet::HotwordCache`：LRU + 动态 boost 的热词缓存，`GetActiveHotwordsWithBoost()` 在解码时给上下文图加权。 |
-| `plate_corrector.cc / plate_corrector.h` | `PlateCorrector`：基于拼音相似度的车牌号纠错（中文省份 + 字母数字混合串）。 |
 | `search_interface.h` | 抽象出 `SearchInterface`，供 prefix-beam-search 与 WFST search 复用同一接口。 |
 
 ### 2.2 上游文件的主要改动
 
 | 文件 | 行差 | 主要变化 |
 |------|------|----------|
-| `asr_decoder.cc / .h` | 814 / 79 | 在 `DecodeResource` 增加 `corrector`、`hotword_cache`、`plate_corrector`、`oov_mapping`、`pinyin_mapper`、`context_hanzi_graph`、`context_pinyin_graph`、`hanzi_unit_table`、`pinyin_unit_table` 等字段；`DecodeResult` 增加 `corrected_hotwords` 与 `token_log_probs`；新增 `AppendPath()` / `CalculateMatchBonus()` / `TextToIds()` / `ApplyMatchesToSentence()`，把热词分支拼接进解码 nbest。 |
+| `asr_decoder.cc / .h` | 814 / 79 | 在 `DecodeResource` 增加 `corrector`、`hotword_cache`、`oov_mapping`、`pinyin_mapper`、`context_hanzi_graph`、`context_pinyin_graph`、`hanzi_unit_table`、`pinyin_unit_table` 等字段；`DecodeResult` 增加 `corrected_hotwords` 与 `token_log_probs`；新增 `AppendPath()` / `CalculateMatchBonus()` / `TextToIds()` / `ApplyMatchesToSentence()`，把热词分支拼接进解码 nbest。 |
 | `context_graph.cc / .h` | 583 / 80 | 新增 `PinyinMapper` 类（汉字↔拼音 id 映射）、`BuildPinyinContextGraph()`（基于拼音的上下文图）；`SplitContextToUnits()` 接受 `oov_mapping`，把 OOV 字符按替身字符（同音 / 近音）注入图；导出 `kFuzzyPinyinMap` 模糊拼音表。 |
-| `params.h` | 271 | 大量新增 gflags：`hotword_path`、`pinyin_dict_path`、`cmu_dict_path`、`oov_mapping_path`、`context_hanzi_path`、`context_pinyin_path`、`hanzi_unit_path`、`pinyin_unit_path`、`hanzi_pinyin_path`、`fuzzy_threshold`、`fuzzy_threshold_en`、`enable_plate_correction`、`enable_hotword_cache`、`max_append_path`；按需初始化 corrector、hanzi/pinyin 上下文图、车牌纠错器。 |
+| `params.h` | 271 | 大量新增 gflags：`hotword_path`、`pinyin_dict_path`、`cmu_dict_path`、`oov_mapping_path`、`context_hanzi_path`、`context_pinyin_path`、`hanzi_unit_path`、`pinyin_unit_path`、`hanzi_pinyin_path`、`fuzzy_threshold`、`fuzzy_threshold_en`、`enable_hotword_cache`、`max_append_path`；按需初始化 corrector、hanzi/pinyin 上下文图。 |
 | `ctc_prefix_beam_search.cc` | 49 | 接入上下文热词图打分（hanzi 路径），用 `AppendPath()` 把命中热词的候选追加到 nbest。 |
 | `ctc_wfst_beam_search.cc / .h` | 35 / 2 | 把 `opts_.blank` 硬编为 `0`（匹配上游模型 unit_id 约定）。 |
 | `ctc_endpoint.cc / .h` | 8 / 13 | `min_trailing_silence` 默认 1000 → 800 毫秒，端点判定更激进。 |
 | `torch_asr_model.cc` | 8 | 移除 `setGraphExecutorOptimize(false)` 与 `setFusionStrategy`（依赖更新后的 LibTorch JIT 行为）。 |
 | `onnx_asr_model.cc / .h` | 修订 | 回退到旧 ONNX C API（已脱敏代码兼容当前 onnxruntime）。 |
 | `asr_model.cc / .h` | 5 / 5 | 头文件适配。 |
-| `CMakeLists.txt` | 28 | 把新增源文件（corrector、hotword_cache、plate_corrector）加入 `decoder` 静态库；引入 `cpp-pinyin::cpp-pinyin` 链接。 |
+| `CMakeLists.txt` | 28 | 把新增源文件（corrector、hotword_cache）加入 `decoder` 静态库；引入 `cpp-pinyin::cpp-pinyin` 链接。 |
 
 ---
 
@@ -64,12 +63,11 @@ core/
 用户交付时已脱敏，但还有两处硬编码与本地路径会让代码无法在干净环境中运行，我们做了如下修复：
 
 1. **`corrector.cc:673`**（已修复）：原代码在 `correct()` 里直接把传入文本强转为固定测试串 `"嗯 是 那 个 最 新 的 GJG 二 零 二 六"`，让 ASR 实际输出失效。删除该行。
-2. **`plate_corrector.cc:26`**（已修复）：原 `kDefaultDictPath` 是开发者本机绝对路径 `/data_163_130/tianyu.wang/…/share/cpp-pinyin/dict`。改为可变空串，并要求通过 `PlateCorrector::Initialize(<path>)` 显式赋值。
-3. **`params.h:445`**（已修复）：在构造 `PlateCorrector` 前调用 `PlateCorrector::Initialize(FLAGS_pinyin_dict_path)`，让脱敏后的车牌纠错能在标准入口拿到字典路径。
-4. **`params.h:171/172`**（已修复）：把 `g_decode_resource` / `g_corrector` 这两个文件作用域全局变量从头文件里移除（多个翻译单元 include 会触发 ODR/redefinition；上游 `decoder_main.cc` 自己已经定义 `g_decode_resource`）。
-5. **`decoder/context_graph.cc`**（已修复）：用户头文件里声明了两组 `BuildContextGraph` 重载（2 参与 3 参），但只实现了 3 参版本。新增 2 参版本，转发到 3 参且 `oov_mapping=nullptr`，恢复 `api/wenet_api.cc` 用到的旧接口。
-6. **`api/wenet_api.cc:125`**（已修复）：字段重命名 `context_graph → context_hanzi_graph`。
-7. **`decoder/params.h:263-279`**（已修复）：原代码对 `hanzi_unit_path`、`pinyin_unit_path`、`hanzi_pinyin_path` 是无条件 `CHECK`。改成 *按需加载*：仅当对应参数非空且文件存在时才读，使得基础 ASR（不启用 pinyin 上下文图时）也能跑通。
+2. **`params.h:171/172`**（已修复）：把 `g_decode_resource` / `g_corrector` 这两个文件作用域全局变量从头文件里移除（多个翻译单元 include 会触发 ODR/redefinition；上游 `decoder_main.cc` 自己已经定义 `g_decode_resource`）。
+3. **`decoder/context_graph.cc`**（已修复）：用户头文件里声明了两组 `BuildContextGraph` 重载（2 参与 3 参），但只实现了 3 参版本。新增 2 参版本，转发到 3 参且 `oov_mapping=nullptr`，恢复 `api/wenet_api.cc` 用到的旧接口。
+4. **`api/wenet_api.cc:125`**（已修复）：字段重命名 `context_graph → context_hanzi_graph`。
+5. **`decoder/params.h:263-279`**（已修复）：原代码对 `hanzi_unit_path`、`pinyin_unit_path`、`hanzi_pinyin_path` 是无条件 `CHECK`。改成 *按需加载*：仅当对应参数非空且文件存在时才读，使得基础 ASR（不启用 pinyin 上下文图时）也能跑通。
+6. **PlateCorrector 整条链路下线**（commit 2 起）：原 `plate_corrector.{cc,h}` 含开发者本机绝对路径，且与 ASR 主链路无关。已删除文件 + `FLAGS_enable_plate_correction` + `DecodeResource::plate_corrector` + CMake 源文件登记。本工程只保留 PhonemeCorrector / 拼音 context graph / hotword cache 三条主路径。
 
 > ⚠️ 这些修改都不影响"提供了完整配置时"的行为，与原始 `core/` 在该路径下输出等价。
 
@@ -161,7 +159,7 @@ echo -e "广州\n房地产\n中介协会" > /tmp/hotwords.txt
 
 加 `--cmu_dict_path <cmudict.dict>` 可开启英文 G2P；不提供时英文回退到字符级切分。
 
-### 5.3 拼音上下文图 + 车牌纠错（完整链路）
+### 5.3 拼音上下文图（完整链路）
 
 需要再准备 3 张词表，AISHELL/u2++ 模型不自带，需基于 cpp-pinyin 的 `res/dict/mandarin/word.txt` 离线构造：
 
@@ -171,7 +169,6 @@ echo -e "广州\n房地产\n中介协会" > /tmp/hotwords.txt
 | `--pinyin_unit_path` | `<pinyin> <id>` | 收集 `word.txt` 中全部独特拼音 |
 | `--hanzi_pinyin_path` | `<汉字> <pinyin1> [pinyin2 ...]` 空白分隔 | 直接由 `word.txt` 转换 |
 | `--context_pinyin_path` | `<text> <py1> <py2> ... <score>` 每行一条热词 | 项目自定义 |
-| `--enable_plate_correction true` | 启动车牌纠错 | 同时需要 `--pinyin_dict_path` |
 
 > 这部分词表生成脚本目前没有捎带，因为不同模型的 `units.txt` 字符集不一样，需要根据具体场景选汉字粒度（是否包含繁简、是否 +BPE）。建议项目自带一份与发布模型匹配的 `gen_hanzi_pinyin.py`。
 
@@ -210,10 +207,10 @@ runtime/core/cmake/openfst.cmake                     (URL 改镜像)
 runtime/core/cmake/wetextprocessing.cmake            (URL 改镜像)
 runtime/libtorch/CMakeLists.txt                      (include(cpp_pinyin))
 runtime/core/decoder/params.h                        (脱敏 + 可选词表)
-runtime/core/decoder/plate_corrector.cc              (移除硬编路径)
 runtime/core/decoder/corrector.cc                    (移除测试串)
 runtime/core/decoder/context_graph.cc                (新增 2-arg BuildContextGraph)
 runtime/core/api/wenet_api.cc                        (字段重命名)
+runtime/core/decoder/plate_corrector.{cc,h}          (删除：车牌纠错下线)
 ```
 
 所有源文件的上游版本已在同目录保存为 `*.orig`，可以 `diff -u <file>.orig <file>` 复核。

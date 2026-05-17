@@ -7,7 +7,6 @@ set(decoder_srcs
   ctc_endpoint.cc
   corrector.cc
   hotword_cache.cc
-  plate_corrector.cc
 )
 
 if(NOT TORCH AND NOT ONNX AND NOT XPU AND NOT IOS AND NOT BPU AND NOT OPENVINO)

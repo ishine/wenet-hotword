@@ -28,7 +28,6 @@
 #include "decoder/asr_model.h"
 #include "decoder/corrector.h"
 #include "decoder/hotword_cache.h"
-#include "decoder/plate_corrector.h"
 #include "decoder/context_graph.h"
 #include "decoder/ctc_endpoint.h"
 #include "decoder/ctc_prefix_beam_search.h"
@@ -120,7 +119,6 @@ struct DecodeResource {
   std::shared_ptr<PostProcessor> post_processor = nullptr;
 
   std::shared_ptr<HotwordCorrection::PhonemeCorrector> corrector = nullptr;
-  std::shared_ptr<PlateCorrector> plate_corrector;
 
   std::shared_ptr<std::unordered_map<std::string, std::string>> oov_mapping;
 

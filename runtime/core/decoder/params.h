@@ -24,7 +24,6 @@
 // #include "punc/punc.h"
 #include "decoder/asr_decoder.h"
 #include "decoder/corrector.h"
-#include "decoder/plate_corrector.h"
 #ifdef USE_ONNX
 #include "decoder/onnx_asr_model.h"
 #endif
@@ -137,7 +136,6 @@ DEFINE_int32(language_type, 0,
              "0x00 = kMandarinEnglish, "
              "0x01 = kIndoEuropean");
 DEFINE_bool(lowercase, true, "lowercase final result if needed");
-DEFINE_bool(enable_plate_correction, false, "enable plate correction");
 DEFINE_bool(enable_hotword_cache, true, "enable hotword cache");
 DEFINE_string(hotword_path, "", "path to hotword file for correction");
 DEFINE_string(pinyin_dict_path, "", "path to cpp-pinyin dictionary");
@@ -456,18 +454,7 @@ std::shared_ptr<DecodeResource> InitDecodeResourceFromFlags() {
   }
 
   // Init plate corrector
-  if (FLAGS_enable_plate_correction) {
-    LOG(INFO) << "Initializing Plate Corrector";
-    if (!FLAGS_pinyin_dict_path.empty()) {
-      PlateCorrector::Initialize(FLAGS_pinyin_dict_path);
-    } else {
-      LOG(WARNING)
-          << "enable_plate_correction=true but pinyin_dict_path is empty; "
-             "PlateCorrector will likely fail to initialize.";
-    }
-    resource->plate_corrector = std::make_shared<PlateCorrector>();
-  }
-
+  // (车牌纠错链路已下线 — 仅保留 PhonemeCorrector / 拼音 context graph 三条主路径)
 
   return resource;
 }
