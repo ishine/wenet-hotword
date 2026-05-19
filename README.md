@@ -1,6 +1,6 @@
-<div align="center">
 
-# ⚡ WeNet Hotword Pipeline
+
+# WeNet Hotword Pipeline
 
 **Hotword-biased decoding for the [WeNet](https://github.com/wenet-e2e/wenet) C++ runtime.**
 
@@ -10,7 +10,19 @@
 
 [**Eval Writeup**](runtime/libtorch/eval_runs/HOTWORD_EVAL.md)
 
-</div>
+
+
+**recall ↑ 4.6×** &nbsp;&nbsp; **CER ↓ 41%**
+
+| | baseline | ours (autotuned) |
+|--|:--:|:--:|
+| hotword recall | 15.96% | **72.70%** |
+| CER | 14.20% | **8.37%** |
+
+<sub>Model: `wenet/u2pp_conformer-asr-cn-16k-online`</sub>
+<br>
+<sub>Dataset: AISHELL-1 hotword test</sub>
+
 
 ## 🌟 Features
 
