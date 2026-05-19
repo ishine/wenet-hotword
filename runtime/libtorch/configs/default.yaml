@@ -64,7 +64,7 @@ hotword:
   # Empty -> the built-in sparse fallback in corrector.cc is used. Generate
   # via `python3 tools/learn_confusion.py`; the path is resolved against the
   # repo root when relative.
-  confusion_matrix_path: "runtime/libtorch/configs/confusion.wenetspeech.csv"
+  confusion_matrix_path: "runtime/libtorch/configs/confusion.csv"
 
   # Master multiplier on CalculateMatchBonus (asr_decoder.cc). Was hardcoded
   # to 2.0f before being exposed as a flag.

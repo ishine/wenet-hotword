@@ -1,6 +1,6 @@
 
 
-# WeNet Hotword Pipeline
+# WeNet Hotword 
 
 **Hotword-biased decoding for the [WeNet](https://github.com/wenet-e2e/wenet) C++ runtime.**
 
@@ -73,11 +73,12 @@ runtime/libtorch/build/bin/decoder_main \
   --result     /dev/stdout
 ```
 
-### 5. Run ablations
+### 5. Prepare confusion matrix
 
+The confusion matrix is model-specific. For the example model:
 ```bash
-bash runtime/libtorch/eval_runs/run_ablations.sh
-column -ts $'\t' runtime/libtorch/eval_runs/summary.tsv
+cp runtime/libtorch/configs/confusion.wenetspeech.csv \
+   runtime/libtorch/configs/confusion.csv
 ```
 
 ### 6. Autotune
@@ -87,6 +88,15 @@ python3 tools/autotune.py \
   --config       runtime/libtorch/configs/default.yaml \
   --search-space runtime/libtorch/configs/search_space.yaml
 ```
+
+### 7. Run ablations
+
+```bash
+bash runtime/libtorch/eval_runs/run_ablations.sh
+column -ts $'\t' runtime/libtorch/eval_runs/summary.tsv
+```
+
+> Switch to a different model? Re-run Step 5 with `learn_confusion.py`, then Step 6.
 ---
 
 ## ⚙️ Configuration
@@ -113,7 +123,7 @@ hotword:
   max_append_path:       20
   use_confidence_reward: true
   enable_hotword_cache:  true
-  confusion_matrix_path: runtime/libtorch/configs/confusion.wenetspeech.csv
+  confusion_matrix_path: runtime/libtorch/configs/confusion.csv
   bonus_weight:          2.0
   confidence_floor:      0.4
   neighbor_threshold:    0.5
