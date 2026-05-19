@@ -1,8 +1,0 @@
-condition	wall_s	CER%	recall%	precision%	F1%	TP	ref	hyp
-A_baseline	18	13.76	25.93	97.22	40.94	35	135	36
-B_phoneme	23	12.31	44.44	98.36	61.22	60	135	61
-D_confidence	22	11.88	48.15	98.48	64.68	65	135	66
-E_cache	23	11.88	48.15	98.48	64.68	65	135	66
-F_autotune	27	9.05	79.26	99.07	88.07	107	135	108
-G_wenet_native	17	10.49	59.26	98.77	74.07	80	135	81
-FG_stacked	34	8.89	80.74	98.20	88.62	109	135	111

@@ -9,9 +9,10 @@
 #   { type: int,         low: <int>, high: <int>, step: <int?> }
 #   { type: categorical, choices: [...] }
 #
-# Sampler is NSGA-II (multi-objective F1↑, CER↓) — see autotune.sampler in
-# default.yaml. The search space stays in the regime that ablations have
-# already shown to matter; widen ranges only after a sweep flatlines.
+# Sampler is TPE multivariate (multi-objective recall↑, CER↓) — see
+# autotune.sampler in default.yaml. The search space stays in the regime
+# that ablations have already shown to matter; widen ranges only after a
+# sweep flatlines.
 
 space:
   # --- rescoring (the load-bearing axis) ---
@@ -38,11 +39,35 @@ space:
   # --- hotword pathway ---
   hotword.fuzzy_threshold:
     type: float
-    low: 0.3
+    low: 0.2
     high: 0.7
+  # Capped at 20 because each appended path runs through the transformer
+  # rescorer; 40 was kept earlier for offline ablations but pushes inference
+  # latency past budget.
   hotword.max_append_path:
     type: categorical
-    choices: [10, 20, 40]
+    choices: [10, 20]
   hotword.use_confidence_reward:
     type: categorical
     choices: [true, false]
+
+  # --- newly exposed knobs (were hardcoded in C++) ---
+  # CalculateMatchBonus master multiplier. 0.5 ≈ "barely bias", 4.0 ≈
+  # "FP explosion likely". The previous hardcoded value was 2.0.
+  hotword.bonus_weight:
+    type: float
+    low: 0.5
+    high: 4.0
+  # FastRAG neighbor-distance cutoff. Phoneme distance lives in [0,1];
+  # 0.3 keeps only strict neighbors, 0.7 lets fairly fuzzy ones through.
+  # Previous hardcoded value was 0.5.
+  hotword.neighbor_threshold:
+    type: float
+    low: 0.3
+    high: 0.7
+  # Lower bound on the avg_confidence divisor; physical range is [0,1].
+  # Previous hardcoded value was 0.4.
+  hotword.confidence_floor:
+    type: float
+    low: 0.2
+    high: 0.8

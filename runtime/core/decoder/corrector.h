@@ -16,7 +16,19 @@
 
 namespace HotwordCorrection {
 
+// Built-in sparse fallback. Used when no CSV is loaded via LoadConfusionMatrix.
 extern const std::map<std::pair<std::string, std::string>, float> CONFUSION_MATRIX;
+
+// Load a dense confusion matrix from CSV. Empty/missing path leaves the
+// sparse fallback active. Format: `from,to,cost` per line; '#' starts a
+// comment; both directions must be listed explicitly if asymmetric.
+void LoadConfusionMatrix(const std::string& path);
+
+// Override the neighbor-expansion cutoff used by FastRAG when reading the
+// dense matrix (`g_neighbor_threshold` in corrector.cc). Must be called
+// BEFORE LoadConfusionMatrix — that's where the neighbor lists are built.
+// Caller responsibility: invoke once at init time, no thread safety.
+void SetNeighborThreshold(float thr);
 
 enum class Lang { ZH, EN, NUM, OTHER };
 

@@ -239,6 +239,15 @@ class HotwordConfig:
     use_confidence_reward: bool = True
     context_score: float = 3.0
     enable_hotword_cache: bool = True
+    # CSV of `from,to,cost`; empty leaves the built-in sparse fallback active.
+    # Generated offline by `tools/learn_confusion.py` from CTC posteriors.
+    confusion_matrix_path: str = ""
+    # Master multiplier on CalculateMatchBonus (was hardcoded 2.0f).
+    bonus_weight: float = 2.0
+    # Lower bound on avg_confidence divisor (was hardcoded 0.4f).
+    confidence_floor: float = 0.4
+    # FastRAG neighbor-distance cutoff (was hardcoded kNeighborThreshold=0.5f).
+    neighbor_threshold: float = 0.5
 
 
 @dataclass
@@ -254,6 +263,7 @@ class AutotuneConfig:
     sampler: str = "nsga2"
     random_seed: int = 0
     cer_baseline: float = 14.20
+    precision_floor: float = 0.0  # 0 = no floor; 95 = conservative hold-out guard
     study_name: str = "default"
     study_db: str = "runtime/libtorch/configs/default.study.db"
     tuned_config_out: str = "runtime/libtorch/configs/default.tuned.yaml"
@@ -348,9 +358,17 @@ class DecoderConfig:
                 "--fuzzy_threshold", str(h.fuzzy_threshold),
                 "--fuzzy_threshold_en", str(h.fuzzy_threshold_en),
                 "--max_append_path", str(h.max_append_path),
+                "--bonus_weight", str(h.bonus_weight),
+                "--confidence_floor", str(h.confidence_floor),
+                "--neighbor_threshold", str(h.neighbor_threshold),
                 f"--use_confidence_reward={'true' if h.use_confidence_reward else 'false'}",
                 f"--enable_hotword_cache={'true' if h.enable_hotword_cache else 'false'}",
             ]
+            if h.confusion_matrix_path:
+                # Repo-relative resolution: the matrix is a per-model artifact,
+                # not a per-test-set one. Absolute paths pass through unchanged.
+                cm = _expand(h.confusion_matrix_path, repo_root)
+                args += ["--confusion_matrix_path", cm]
         return args
 
 

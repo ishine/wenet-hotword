@@ -60,19 +60,42 @@ hotword:
   # on IID tests.
   enable_hotword_cache: true
 
+  # Dense phoneme confusion matrix learned from this model's CTC posteriors.
+  # Empty -> the built-in sparse fallback in corrector.cc is used. Generate
+  # via `python3 tools/learn_confusion.py`; the path is resolved against the
+  # repo root when relative.
+  confusion_matrix_path: "runtime/libtorch/configs/confusion.wenetspeech.csv"
+
+  # Master multiplier on CalculateMatchBonus (asr_decoder.cc). Was hardcoded
+  # to 2.0f before being exposed as a flag.
+  bonus_weight: 2.0
+  # Lower bound on the divisor in `bonus / max(floor, avg_conf)` — caps how
+  # much amplification low-confidence regions can receive.
+  confidence_floor: 0.4
+  # FastRAG neighbor-distance cutoff applied when reading the dense matrix
+  # (only used at corrector init time, before LoadConfusionMatrix builds
+  # `g_dense_neighbors`).
+  neighbor_threshold: 0.5
+
 runtime:
   thread_num: 0                              # 0 = auto (use nproc)
   warmup: 0
   simulate_streaming: false
 
 autotune:
-  # Multi-objective (F1↑, CER↓) Pareto search via Optuna.
+  # Multi-objective (recall↑, CER↓) Pareto search via Optuna.
   n_trials: 100                              # trial budget per study (resumes if study_db exists)
-  sampler: nsga2                             # [nsga2, tpe]
+  sampler: tpe                               # [tpe, nsga2]
   random_seed: 0
-  # CER ceiling for the knee pick: take the highest-F1 Pareto trial whose CER
-  # stays under this value. Default ~ A_baseline CER on AISHELL hotword.
+  # CER ceiling for the knee pick: take the highest-recall Pareto trial whose
+  # CER stays under this value. Applied to held-out CER when held-out eval
+  # is configured. Default ~ A_baseline CER on AISHELL hotword.
   cer_baseline: 14.20
+  # Precision floor (%) for the knee pick. 0 = disabled. Raising this prevents
+  # the autotuner from selecting an over-aggressive configuration that harms
+  # generalization on a broader-domain hold-out set (the AWQ-style bias
+  # strength constraint).
+  precision_floor: 0.0
   study_name: default
   # Persistence (relative to repo root). The study_db is the source of truth;
   # delete it to restart, keep it to resume / extend.

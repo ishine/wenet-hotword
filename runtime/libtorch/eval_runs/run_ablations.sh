@@ -10,8 +10,8 @@
 #   B_phoneme                   + phoneme corrector (fuzzy recall, no confidence)
 #   D_confidence                + acoustic-confidence weighted bonus
 #   E_cache                     + LRU hotword cache (full stack)
-#   F_autotune                  E_cache + Optuna NSGA-II knee knobs from
-#                               configs/default.tuned.yaml (skipped if absent)
+#   F_autotune                  E_cache + Optuna TPE knee knobs from
+#                               configs/default.full.tuned.yaml (skipped if absent)
 #   G_wenet_native              Off-ladder fair baseline: upstream WeNet's
 #                               character-FST biasing alone (no corrector,
 #                               no cache). The A_baseline row turns hotword
@@ -117,9 +117,9 @@ run_condition "D_confidence" \
 run_condition "E_cache" \
   "${hotword_flags[@]}" "${cache_flag[@]}" "${conf_on[@]}"
 
-# --- F: + Optuna NSGA-II knee config (full hotword stack + tuned knobs) --------
+# --- F: + Optuna TPE knee config (full hotword stack + tuned knobs) ------------
 # F_autotune = E_cache flag stack overlaid with the knee config that
-# tools/autotune.py writes to configs/default.tuned.yaml. Skipped cleanly if
+# tools/autotune.py writes to configs/default.full.tuned.yaml. Skipped cleanly if
 # the tuned yaml is missing (e.g. fresh checkout, autotune not yet run).
 TUNED_YAML="${TUNED_YAML:-$RUNTIME_DIR/configs/default.tuned.yaml}"
 if [[ -f "$TUNED_YAML" ]]; then
@@ -137,6 +137,11 @@ print(f"--nbest={d.nbest}")
 print(f"--fuzzy_threshold={h.fuzzy_threshold}")
 print(f"--max_append_path={h.max_append_path}")
 print(f"--use_confidence_reward={'true' if h.use_confidence_reward else 'false'}")
+print(f"--bonus_weight={h.bonus_weight}")
+print(f"--confidence_floor={h.confidence_floor}")
+print(f"--neighbor_threshold={h.neighbor_threshold}")
+if h.confusion_matrix_path:
+    print(f"--confusion_matrix_path={h.confusion_matrix_path}")
 PY
 )
   run_condition "F_autotune" \

@@ -4,13 +4,16 @@
 
 Reads a base config (`--config`) and a search space (`--search-space`),
 runs `decoder_main` over `paths.testset_dir` for `n_trials` configurations
-chosen by Optuna's NSGA-II sampler, and optimizes (F1↑, CER↓) jointly.
+chosen by Optuna's TPE multivariate sampler, and optimizes (recall↑, CER↓)
+jointly. F1 is logged as a user_attr for inspection but is not optimized;
+recall is the load-bearing axis because the precision floor is saturated.
 
 Outputs:
-  * `autotune.tuned_config_out`   — knee point on the Pareto front
-                                    (max F1 such that CER ≤ cer_baseline)
-  * `autotune.pareto_out`         — full Pareto front (JSONL)
-  * `autotune.eval_metrics_out`   — knee config re-run on `eval_testset_dir`
+  * `autotune.tuned_config_out`   — best Pareto point as scored on the
+                                    held-out eval set (not on tune-set knee)
+  * `autotune.pareto_out`         — full Pareto front (JSONL) with both
+                                    tune-set and held-out metrics per point
+  * `autotune.eval_metrics_out`   — final config re-run on `eval_testset_dir`
   * `autotune.study_db`           — Optuna SQLite store (resumable)
 
 Re-running with the same `study_db` resumes the study; trials already in
@@ -115,9 +118,82 @@ class TrialResult:
     error: Optional[str] = None
 
 
+# --- daemon helpers -----------------------------------------------------------
+
+def _cfg_to_daemon_params(cfg: DecoderConfig) -> Dict[str, Any]:
+    """Extract trial-varying decoder params for daemon JSON payload."""
+    d = cfg.decode
+    h = cfg.hotword
+    testset_dir = _expand(cfg.paths.testset_dir, REPO_ROOT)
+    hotword_path = h.hotword_path
+    if hotword_path and not os.path.isabs(hotword_path):
+        hotword_path = os.path.join(testset_dir, hotword_path)
+    params: Dict[str, Any] = {
+        "ctc_weight": d.ctc_weight,
+        "rescoring_weight": d.rescoring_weight,
+        "reverse_weight": d.reverse_weight,
+        "length_penalty": d.length_penalty,
+        "nbest": d.nbest,
+        "chunk_size": d.chunk_size,
+        "num_left_chunks": d.num_left_chunks,
+        "fuzzy_threshold": h.fuzzy_threshold,
+        "fuzzy_threshold_en": h.fuzzy_threshold_en,
+        "max_append_path": h.max_append_path,
+        "use_confidence_reward": h.use_confidence_reward,
+        "bonus_weight": h.bonus_weight,
+        "confidence_floor": h.confidence_floor,
+        "neighbor_threshold": h.neighbor_threshold,
+        "hotword_path": hotword_path,
+        "confusion_matrix_path": _expand(h.confusion_matrix_path, REPO_ROOT),
+        "enable_hotword_cache": h.enable_hotword_cache,
+    }
+    return params
+
+
+def _start_daemon(cfg: DecoderConfig) -> subprocess.Popen:
+    """Start decoder_main in daemon mode with heavy resources pre-loaded."""
+    decoder_bin = _expand(cfg.paths.decoder_bin, REPO_ROOT)
+    if not os.path.exists(decoder_bin):
+        raise FileNotFoundError(f"decoder_main not found at {decoder_bin}")
+
+    model_dir = _expand(cfg.paths.model_dir, REPO_ROOT)
+    argv = [
+        decoder_bin,
+        "--daemon",
+        "--model_path", os.path.join(model_dir, "final.zip"),
+        "--unit_path", os.path.join(model_dir, "units.txt"),
+        "--pinyin_dict_path", _expand(cfg.paths.pinyin_dict_dir, REPO_ROOT),
+        "--thread_num", str(cfg.runtime.thread_num or os.cpu_count() or 1),
+    ]
+    if cfg.hotword.confusion_matrix_path:
+        cm = _expand(cfg.hotword.confusion_matrix_path, REPO_ROOT)
+        argv += ["--confusion_matrix_path", cm]
+
+    return subprocess.Popen(
+        argv,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+
+
+def _daemon_decode(proc: subprocess.Popen, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Send JSON payload to daemon and return parsed response."""
+    proc.stdin.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    proc.stdin.flush()
+    resp_line = proc.stdout.readline().strip()
+    if not resp_line:
+        return None
+    return json.loads(resp_line)
+
+
+# --- decoder invocation -------------------------------------------------------
+
 def _run_trial(base: DecoderConfig, override: Dict[str, Any], trial_id: int,
                work_dir: str, log_decoder: bool,
-               testset_override: Optional[str] = None) -> TrialResult:
+               testset_override: Optional[str] = None,
+               daemon_proc: Optional[subprocess.Popen] = None) -> TrialResult:
     """Run decoder_main once with `override` applied; collect CER + hotword
     metrics. `testset_override` swaps `paths.testset_dir` for the held-out
     final-eval pass."""
@@ -128,20 +204,45 @@ def _run_trial(base: DecoderConfig, override: Dict[str, Any], trial_id: int,
     hyp_path = os.path.join(work_dir, f"{tag}.txt")
     log_path = os.path.join(work_dir, f"{tag}.log")
 
-    decoder_bin = _expand(cfg.paths.decoder_bin, REPO_ROOT)
-    if not os.path.exists(decoder_bin):
-        return TrialResult(trial_id, override, None, None, None, None, None, 0.0,
-                           error=f"decoder_main not found at {decoder_bin}")
-    argv = [decoder_bin] + cfg.to_decoder_args(repo_root=REPO_ROOT,
-                                               result_path=hyp_path)
     t0 = time.time()
-    try:
-        with open(log_path, "w") as logf:
-            subprocess.run(argv, stdout=logf, stderr=subprocess.STDOUT, check=True)
-    except subprocess.CalledProcessError as exc:
-        return TrialResult(trial_id, override, None, None, None, None, None,
-                           time.time() - t0,
-                           error=f"decoder_main failed (exit {exc.returncode}); see {log_path}")
+    if daemon_proc is not None:
+        # Daemon mode: send JSON payload, reuse loaded model
+        testset_dir = _expand(cfg.paths.testset_dir, REPO_ROOT)
+        wav_scp = os.path.join(testset_dir, "wav.scp")
+        payload = {
+            "wav_scp": wav_scp,
+            "result": hyp_path,
+            "params": _cfg_to_daemon_params(cfg),
+        }
+        try:
+            resp = _daemon_decode(daemon_proc, payload)
+            if resp is None:
+                return TrialResult(trial_id, override, None, None, None, None, None,
+                                   time.time() - t0,
+                                   error="daemon returned empty response")
+            if resp.get("status") != "ok":
+                return TrialResult(trial_id, override, None, None, None, None, None,
+                                   time.time() - t0,
+                                   error=f"daemon error: {resp.get('message', 'unknown')}")
+        except Exception as exc:
+            return TrialResult(trial_id, override, None, None, None, None, None,
+                               time.time() - t0,
+                               error=f"daemon communication failed: {exc}")
+    else:
+        # Subprocess mode: cold-start decoder_main per trial
+        decoder_bin = _expand(cfg.paths.decoder_bin, REPO_ROOT)
+        if not os.path.exists(decoder_bin):
+            return TrialResult(trial_id, override, None, None, None, None, None, 0.0,
+                               error=f"decoder_main not found at {decoder_bin}")
+        argv = [decoder_bin] + cfg.to_decoder_args(repo_root=REPO_ROOT,
+                                                   result_path=hyp_path)
+        try:
+            with open(log_path, "w") as logf:
+                subprocess.run(argv, stdout=logf, stderr=subprocess.STDOUT, check=True)
+        except subprocess.CalledProcessError as exc:
+            return TrialResult(trial_id, override, None, None, None, None, None,
+                               time.time() - t0,
+                               error=f"decoder_main failed (exit {exc.returncode}); see {log_path}")
     wall = time.time() - t0
 
     testset_dir = _expand(cfg.paths.testset_dir, REPO_ROOT)
@@ -219,39 +320,52 @@ def _compute_hotword_metrics(ref: str, hyp: str, hotwords: str,
 # Sentinel values for failed trials. Optuna requires numeric returns from a
 # multi-objective objective; we report worst-possible values so the trial is
 # dominated on the Pareto front but the study keeps moving.
-_FAIL_F1, _FAIL_CER = -1.0, 1e6
+_FAIL_R, _FAIL_CER = -1.0, 1e6
 
 
 def _build_sampler(name: str, seed: int) -> optuna.samplers.BaseSampler:
     name = name.lower()
+    if name in ("tpe", "tpe_multi", "motpe"):
+        # Multivariate TPE: learns joint density across knobs, handles
+        # cat/int/float mixed types, multi-objective natively. `constant_liar`
+        # avoids duplicate samples under n_jobs > 1.
+        return TPESampler(seed=seed, multivariate=True, group=True,
+                          constant_liar=True)
     if name in ("nsga2", "nsgaii", "nsga-ii"):
         return NSGAIISampler(seed=seed)
-    if name in ("tpe", "motpe"):
-        # MOTPESampler was deprecated; modern TPESampler handles multi-objective
-        # natively. Keep "motpe" as an alias for backwards compat.
-        return TPESampler(seed=seed, multivariate=True, group=True)
-    raise ValueError(f"unknown sampler {name!r} (expected nsga2 | tpe)")
+    raise ValueError(f"unknown sampler {name!r} (expected tpe | nsga2)")
 
 
-def _knee_pick(trials: List[optuna.trial.FrozenTrial], cer_baseline: float
+def _knee_pick(trials: List[optuna.trial.FrozenTrial], cer_baseline: float,
+               precision_floor: float = 0.0,
                ) -> Optional[optuna.trial.FrozenTrial]:
-    """Pick the Pareto trial with the highest F1 whose CER stays under
-    `cer_baseline`. Falls back to the trial closest to the baseline (lowest
-    CER) if every Pareto trial violates the cap."""
+    """Pick the Pareto trial with the highest recall whose CER stays under
+    `cer_baseline`. If `precision_floor > 0`, further require
+    `trial.user_attrs['precision'] >= precision_floor`.
+    Falls back to the trial closest to the baseline (lowest CER) if every
+    Pareto trial violates the cap. Values are (recall, CER)."""
     if not trials:
         return None
-    valid = [t for t in trials if t.values is not None and t.values[1] <= cer_baseline]
-    if valid:
-        return max(valid, key=lambda t: t.values[0])
+    candidates = [t for t in trials if t.values is not None and t.values[1] <= cer_baseline]
+    if precision_floor > 0:
+        strict = [t for t in candidates
+                  if t.user_attrs.get("precision", 0.0) >= precision_floor]
+        if strict:
+            return max(strict, key=lambda t: t.values[0])
+        # precision floor was too strict; fall back to CER-only among capped
+        if candidates:
+            return max(candidates, key=lambda t: t.values[0])
+    elif candidates:
+        return max(candidates, key=lambda t: t.values[0])
     # everything blew through the CER cap; pick the lowest-CER point as a tie-break
     return min(trials, key=lambda t: t.values[1])
 
 
 def _serialize_trial(t: optuna.trial.FrozenTrial) -> Dict[str, Any]:
-    f1, cer = (t.values or [None, None])[:2]
+    recall, cer = (t.values or [None, None])[:2]
     rec = {
         "trial_id": t.number,
-        "f1": f1,
+        "recall": recall,
         "cer": cer,
         "state": t.state.name,
         "params": dict(t.params),
@@ -282,9 +396,39 @@ def main() -> int:
                    help="don't run the held-out eval pass after tuning")
     p.add_argument("--dry-run", action="store_true",
                    help="print search space, sampler, n_trials and exit")
+    p.add_argument("--n-jobs", type=int, default=1,
+                   help="parallel trials (Optuna n_jobs). Each trial gets "
+                        "nproc/n_jobs threads to avoid oversubscribing cores.")
+    p.add_argument("--phase", choices=["model", "scene"], default="scene",
+                   help="model = calibrate model-level params (recall↑ vs CER↓); "
+                        "scene = fine-tune scene-level params "
+                        "(recall vs CER Pareto).")
+    p.add_argument("--daemon", action="store_true",
+                   help="use decoder_main --daemon for model reuse across trials")
+    p.add_argument("--model-config", default=None,
+                   help="for --phase scene: YAML with frozen model-level params "
+                        "(output of a prior --phase model run).")
     args = p.parse_args()
 
     base = DecoderConfig.from_yaml(args.config)
+
+    # Phase setup
+    if args.phase == "model":
+        print("[info] phase = model  (multi-objective: recall↑, CER↓)")
+    elif args.phase == "scene":
+        if args.model_config:
+            model_cfg = DecoderConfig.from_yaml(args.model_config)
+            # Freeze model-level params into base config
+            for dotted in ["decode.ctc_weight", "decode.rescoring_weight",
+                           "decode.reverse_weight", "decode.length_penalty",
+                           "decode.nbest", "hotword.confidence_floor",
+                           "hotword.neighbor_threshold"]:
+                val = model_cfg.get_dotted(dotted)
+                base.set_dotted(dotted, val)
+            print(f"[info] phase = scene  (model-level params frozen from {args.model_config})")
+        else:
+            print("[info] phase = scene  (no --model-config provided; using base config model params)")
+
     space = SearchSpace.from_yaml(args.search_space)
 
     n_trials = args.n_trials if args.n_trials is not None else base.autotune.n_trials
@@ -302,20 +446,34 @@ def main() -> int:
 
     print(f"[info] sampler   = {sampler_name}")
     print(f"[info] n_trials  = {n_trials}")
+    print(f"[info] n_jobs    = {args.n_jobs}")
     print(f"[info] search    = {len(space.space)} knobs ({', '.join(space.space)})")
     print(f"[info] study_db  = {study_db}")
     print(f"[info] work_dir  = {work_dir}")
+
+    # Parallel trials oversubscribe the box if each decoder still grabs all
+    # cores. Cap per-trial threads so n_jobs trials share the machine cleanly.
+    # n_jobs=1 keeps the legacy "thread_num=0 -> nproc" behavior untouched.
+    if args.n_jobs > 1:
+        per_trial = max(1, (os.cpu_count() or 1) // args.n_jobs)
+        base.runtime.thread_num = per_trial
+        print(f"[info] thread_num per trial = {per_trial}")
 
     if args.dry_run:
         for k, spec in space.space.items():
             print(f"  {k}: {spec}")
         return 0
 
+    # Study setup: multi-objective (recall↑, CER↓) for both phases
+    study_name = f"{base.autotune.study_name}_{args.phase}"
+    directions = ["maximize", "minimize"]  # recall, CER
+    fail_val = (-1.0, 1e6)
+
     sampler = _build_sampler(sampler_name, seed)
     study = optuna.create_study(
-        study_name=base.autotune.study_name,
+        study_name=study_name,
         storage=f"sqlite:///{study_db}",
-        directions=["maximize", "minimize"],  # F1, CER
+        directions=directions,
         sampler=sampler,
         load_if_exists=True,
     )
@@ -323,99 +481,251 @@ def main() -> int:
     if done_before:
         print(f"[info] resuming study: {done_before} prior trials in {study_db}")
 
+    # Start daemon if requested
+    daemon_proc = None
+    if args.daemon:
+        try:
+            daemon_proc = _start_daemon(base)
+            print("[info] daemon started")
+        except Exception as e:
+            print(f"[error] failed to start daemon: {e}", file=sys.stderr)
+            return 1
+
+    # Status file for external monitoring
+    status_file = os.path.join(work_dir, "autotune.status.json")
+
+    def _write_status(trial_num: int, completed: int, best_recall: float,
+                      best_cer: float, pareto_size: int, wall_s: float):
+        import json as _json
+        try:
+            with open(status_file, "w") as f:
+                _json.dump({
+                    "phase": args.phase,
+                    "trial_completed": completed,
+                    "total_trials": n_trials,
+                    "best_recall": best_recall,
+                    "best_cer": best_cer,
+                    "pareto_size": pareto_size,
+                    "current_trial": trial_num,
+                    "last_wall_s": wall_s,
+                }, f, indent=2)
+        except Exception:
+            pass
+
     def objective(trial: optuna.Trial):
         override = space.suggest(trial)
-        t = _run_trial(base, override, trial.number, work_dir, args.keep_decoder_logs)
-        # stash everything on the trial so post-hoc analysis works without the JSONL
-        for k, v in {"recall": t.recall, "precision": t.precision, "tp": t.tp,
+        t = _run_trial(base, override, trial.number, work_dir,
+                       args.keep_decoder_logs,
+                       daemon_proc=daemon_proc)
+        for k, v in {"f1": t.f1, "precision": t.precision, "tp": t.tp,
                      "wall_s": t.wall_s, "error": t.error}.items():
             if v is not None:
                 trial.set_user_attr(k, v)
-        if t.error or t.cer is None or t.f1 is None:
+        if t.error or t.cer is None:
             print(f"[trial {trial.number}] error: {t.error or 'no metrics'}")
-            return _FAIL_F1, _FAIL_CER
-        print(f"[trial {trial.number}] F1={t.f1:.2f}% CER={t.cer:.2f}% "
-              f"recall={t.recall:.2f}% wall={t.wall_s:.1f}s  {override}")
-        return t.f1, t.cer
+            _write_status(trial.number, trial.number, 0.0, 999.0, 0, 0.0)
+            return fail_val
+        if t.recall is None:
+            print(f"[trial {trial.number}] error: no recall")
+            _write_status(trial.number, trial.number, 0.0, 999.0, 0, 0.0)
+            return fail_val
+        print(f"[trial {trial.number}] R={t.recall:.2f}% CER={t.cer:.2f}% "
+              f"F1={t.f1:.2f}% wall={t.wall_s:.1f}s  {override}")
+        # Update best metrics
+        completed = len([tr for tr in study.trials
+                        if tr.state == optuna.trial.TrialState.COMPLETE])
+        best_recall = max((tr.values[0] for tr in study.trials
+                          if tr.state == optuna.trial.TrialState.COMPLETE
+                          and tr.values is not None), default=0.0)
+        best_cer = min((tr.values[1] for tr in study.trials
+                       if tr.state == optuna.trial.TrialState.COMPLETE
+                       and tr.values is not None), default=999.0)
+        pareto = study.best_trials if hasattr(study, 'best_trials') else []
+        _write_status(trial.number, completed, best_recall, best_cer,
+                     len(pareto), t.wall_s)
+        return t.recall, t.cer
 
     remaining = max(0, n_trials - done_before)
     if remaining == 0:
         print(f"[info] study already has {done_before} ≥ n_trials={n_trials}; skipping optimize")
     else:
         try:
-            study.optimize(objective, n_trials=remaining, gc_after_trial=True)
+            study.optimize(objective, n_trials=remaining,
+                           n_jobs=args.n_jobs, gc_after_trial=True)
         except KeyboardInterrupt:
             print("\n[warn] interrupted — partial study preserved at "
                   f"{study_db}", file=sys.stderr)
 
-    # --- Pareto front + knee pick ---
+    # --- Result selection (Pareto front for both phases) ---
+    # --- Pareto front (tune-set) ---
     pareto = study.best_trials
     print()
     print(f"=== Pareto front ({len(pareto)} trials) ===")
-    print(f"{'trial':>6} {'F1':>7} {'CER':>7}  overrides")
+    print(f"{'trial':>6} {'R':>7} {'CER':>7}  overrides")
     for t in sorted(pareto, key=lambda tt: -(tt.values[0] if tt.values else -1)):
-        f1, cer = t.values
+        recall, cer = t.values
         ov = ",".join(f"{k}={v}" for k, v in t.params.items())
-        print(f"{t.number:>6} {f1:>6.2f}% {cer:>6.2f}%  {ov}")
+        print(f"{t.number:>6} {recall:>6.2f}% {cer:>6.2f}%  {ov}")
 
-    # write Pareto JSONL
+    if not pareto:
+        print("[error] no Pareto trials produced; nothing to persist", file=sys.stderr)
+        return 2
+
+    # --- Held-out eval on EVERY Pareto point ---
+    eval_dir = _expand(base.paths.eval_testset_dir, REPO_ROOT)
+    do_holdout = (not args.skip_eval) and eval_dir and os.path.isdir(eval_dir)
+
+    holdout_results: Dict[int, TrialResult] = {}
+    if do_holdout:
+        print(f"\n=== Pareto held-out eval on {eval_dir} ({len(pareto)} points) ===")
+        print(f"{'trial':>6} {'tune R':>8} {'tune CER':>9}  "
+              f"{'hold R':>8} {'hold CER':>9} {'hold P':>7} {'hold FP':>7}")
+        for t in sorted(pareto, key=lambda tt: -(tt.values[0] if tt.values else -1)):
+            tune_R, tune_CER = t.values
+            res = _run_trial(base, t.params, trial_id=900000 + t.number,
+                             work_dir=work_dir,
+                             log_decoder=args.keep_decoder_logs,
+                             testset_override=eval_dir,
+                             daemon_proc=daemon_proc)
+            holdout_results[t.number] = res
+            if res.error or res.cer is None:
+                print(f"{t.number:>6} {tune_R:>7.2f}% {tune_CER:>8.2f}%   "
+                      f"error: {res.error}")
+                continue
+            fp = (res.tp * (100.0 - res.precision) / res.precision
+                  if res.precision else None)
+            print(f"{t.number:>6} {tune_R:>7.2f}% {tune_CER:>8.2f}%  "
+                  f"{res.recall:>7.2f}% {res.cer:>8.2f}% {res.precision:>6.2f}% "
+                  f"{fp if fp is None else f'{fp:>6.2f}'}")
+    else:
+        if not eval_dir:
+            print("\n[info] paths.eval_testset_dir is empty; skipping held-out")
+
+    # --- Pareto JSONL ---
     os.makedirs(os.path.dirname(pareto_out) or ".", exist_ok=True)
     with open(pareto_out, "w") as f:
         for t in pareto:
-            f.write(json.dumps(_serialize_trial(t), ensure_ascii=False) + "\n")
+            rec = _serialize_trial(t)
+            res = holdout_results.get(t.number)
+            if res is not None and res.cer is not None:
+                rec["holdout"] = {
+                    "recall": res.recall, "cer": res.cer,
+                    "precision": res.precision, "tp": res.tp,
+                    "f1": res.f1, "wall_s": res.wall_s,
+                }
+            elif res is not None:
+                rec["holdout_error"] = res.error
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     print(f"\n[ok] Pareto front -> {pareto_out}")
 
-    knee = _knee_pick(pareto, base.autotune.cer_baseline)
-    if knee is None:
-        print("[error] no Pareto trials produced; nothing to persist", file=sys.stderr)
-        return 2
-    f1, cer = knee.values
-    print(f"[ok] knee pick: trial {knee.number}  F1={f1:.2f}%  CER={cer:.2f}%  "
-          f"(cer_baseline={base.autotune.cer_baseline:.2f}%)")
+    # --- Pick the final config ---
+    cer_baseline = base.autotune.cer_baseline
+    precision_floor = base.autotune.precision_floor
+    pick_mode = "tune-set knee (no held-out)"
+    if do_holdout and holdout_results:
+        scored: List[tuple] = []
+        for t in pareto:
+            res = holdout_results.get(t.number)
+            if res is None or res.cer is None or res.recall is None:
+                continue
+            scored.append((t, res))
+        valid = [pr for pr in scored if pr[1].cer <= cer_baseline]
+        if precision_floor > 0:
+            strict = [pr for pr in valid
+                      if pr[1].precision is not None and pr[1].precision >= precision_floor]
+            if strict:
+                best_pair = max(strict, key=lambda pr: pr[1].recall)
+                pick_mode = (f"held-out knee (R↑ under CER ≤ {cer_baseline:.2f}, "
+                             f"P ≥ {precision_floor:.0f}%)")
+            elif valid:
+                best_pair = max(valid, key=lambda pr: pr[1].recall)
+                pick_mode = (f"held-out knee (R↑ under CER ≤ {cer_baseline:.2f}, "
+                             f"P floor relaxed)")
+            elif scored:
+                best_pair = min(scored, key=lambda pr: pr[1].cer)
+                pick_mode = f"held-out fallback (every Pareto blew CER cap; min CER)"
+            else:
+                best_pair = None
+        else:
+            if valid:
+                best_pair = max(valid, key=lambda pr: pr[1].recall)
+                pick_mode = f"held-out knee (R↑ under CER ≤ {cer_baseline:.2f})"
+            elif scored:
+                best_pair = min(scored, key=lambda pr: pr[1].cer)
+                pick_mode = f"held-out fallback (every Pareto blew CER cap; min CER)"
+            else:
+                best_pair = None
+        if best_pair is not None:
+            best_trial, best_holdout = best_pair
+        else:
+            best_trial, best_holdout = _knee_pick(pareto, cer_baseline, precision_floor), None
+    else:
+        best_trial = _knee_pick(pareto, cer_baseline, precision_floor)
+        best_holdout = None
 
-    tuned_cfg = merge_overrides(base, knee.params)
-    tuned_cfg.name = f"{base.name}.tuned"
+    if best_trial is None:
+        print("[error] no Pareto trials usable", file=sys.stderr)
+        return 2
+
+    tune_R, tune_CER = best_trial.values
+    print(f"\n[ok] selected: trial {best_trial.number}  via {pick_mode}")
+    print(f"       tune-set: R={tune_R:.2f}% CER={tune_CER:.2f}%")
+    if best_holdout is not None:
+        print(f"       held-out: R={best_holdout.recall:.2f}% "
+              f"CER={best_holdout.cer:.2f}% P={best_holdout.precision:.2f}%")
+
+    tuned_cfg = merge_overrides(base, best_trial.params)
+    if args.phase == "model":
+        tuned_cfg.name = f"{base.name}.model_tuned"
+    else:
+        tuned_cfg.name = f"{base.name}.tuned"
     os.makedirs(os.path.dirname(tuned_out) or ".", exist_ok=True)
     tuned_cfg.to_yaml(tuned_out)
-    print(f"[ok] knee config -> {tuned_out}")
+    if args.phase == "model":
+        print(f"[ok] model config -> {tuned_out}")
+    else:
+        print(f"[ok] selected config -> {tuned_out}")
     for k, (a, b) in diff_config(base, tuned_cfg).items():
         if k == "name":
             continue
         print(f"       {k}: {a} -> {b}")
 
-    # --- held-out final eval ---
-    eval_dir = _expand(base.paths.eval_testset_dir, REPO_ROOT)
-    if args.skip_eval or not eval_dir:
-        if not eval_dir:
-            print("\n[info] paths.eval_testset_dir is empty; skipping held-out eval")
-        return 0
-    if not os.path.isdir(eval_dir):
-        print(f"[warn] eval_testset_dir not a directory: {eval_dir}", file=sys.stderr)
+    if not do_holdout:
+        if daemon_proc is not None:
+            daemon_proc.stdin.write("EXIT\n")
+            daemon_proc.stdin.flush()
+            daemon_proc.wait()
         return 0
 
-    print(f"\n=== Held-out eval on {eval_dir} ===")
-    eval_result = _run_trial(base, knee.params, trial_id=999999,
-                             work_dir=work_dir, log_decoder=args.keep_decoder_logs,
-                             testset_override=eval_dir)
-    if eval_result.error:
-        print(f"[error] eval failed: {eval_result.error}", file=sys.stderr)
+    # --- Write eval_metrics_out ---
+    res = best_holdout if best_holdout is not None else holdout_results.get(best_trial.number)
+    if res is None:
+        res = _run_trial(base, best_trial.params, trial_id=999999,
+                         work_dir=work_dir, log_decoder=args.keep_decoder_logs,
+                         testset_override=eval_dir,
+                         daemon_proc=daemon_proc)
+    if res.error:
+        print(f"[error] eval failed: {res.error}", file=sys.stderr)
         return 3
-    print(f"F1={eval_result.f1:.2f}%  CER={eval_result.cer:.2f}%  "
-          f"recall={eval_result.recall:.2f}%  precision={eval_result.precision:.2f}%  "
-          f"wall={eval_result.wall_s:.1f}s")
 
     os.makedirs(os.path.dirname(eval_out) or ".", exist_ok=True)
     with open(eval_out, "w") as f:
         f.write(f"# held-out eval of {tuned_out} on {eval_dir}\n")
         f.write(f"# tune set: {_expand(base.paths.testset_dir, REPO_ROOT)} "
-                f"(knee F1={f1:.2f}% CER={cer:.2f}%)\n")
-        f.write(f"F1={eval_result.f1:.2f}\n")
-        f.write(f"CER={eval_result.cer:.2f}\n")
-        f.write(f"recall={eval_result.recall:.2f}\n")
-        f.write(f"precision={eval_result.precision:.2f}\n")
-        f.write(f"true_positives={eval_result.tp}\n")
-        f.write(f"wall_s={eval_result.wall_s:.1f}\n")
+                f"(selected trial {best_trial.number}: "
+                f"R={tune_R:.2f}% CER={tune_CER:.2f}%; pick={pick_mode})\n")
+        f.write(f"recall={res.recall:.2f}\n")
+        f.write(f"CER={res.cer:.2f}\n")
+        f.write(f"F1={res.f1:.2f}\n")
+        f.write(f"precision={res.precision:.2f}\n")
+        f.write(f"true_positives={res.tp}\n")
+        f.write(f"wall_s={res.wall_s:.1f}\n")
     print(f"[ok] eval metrics -> {eval_out}")
+
+    if daemon_proc is not None:
+        daemon_proc.stdin.write("EXIT\n")
+        daemon_proc.stdin.flush()
+        daemon_proc.wait()
     return 0
 
 

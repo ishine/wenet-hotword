@@ -101,6 +101,15 @@ DEFINE_bool(use_confidence_reward, true,
             "use per-token CTC confidence to scale the hotword-correction "
             "bonus (correct_with_confidence). Set to false to ablate the "
             "acoustic confidence reward and fall back to a uniform bonus.");
+DEFINE_double(bonus_weight, 2.0,
+              "master multiplier on the hotword-correction bonus "
+              "(CalculateMatchBonus). raises R, risks raising FP.");
+DEFINE_double(confidence_floor, 0.4,
+              "lower bound used when dividing the bonus by avg_confidence; "
+              "controls how much amplification low-confidence regions get.");
+DEFINE_double(neighbor_threshold, 0.5,
+              "phoneme-distance cutoff used by FastRAG when generating "
+              "candidate neighbors from the dense confusion matrix.");
 
 // SymbolTable flags
 DEFINE_string(dict_path, "",
@@ -125,6 +134,10 @@ DEFINE_bool(lowercase, true, "lowercase final result if needed");
 DEFINE_bool(enable_hotword_cache, true, "enable hotword cache");
 DEFINE_string(hotword_path, "", "path to hotword file for correction");
 DEFINE_string(pinyin_dict_path, "", "path to cpp-pinyin dictionary");
+DEFINE_string(confusion_matrix_path, "",
+              "path to a learned phoneme confusion matrix CSV "
+              "(`from,to,cost` per line). Empty leaves the built-in sparse "
+              "fallback in corrector.cc active.");
 
 DEFINE_string(oov_mapping_path, "", "path to OOV mapping file");
 
@@ -155,6 +168,8 @@ std::shared_ptr<DecodeOptions> InitDecodeOptionsFromFlags() {
   decode_config->ctc_prefix_search_opts.first_beam_size = FLAGS_nbest;
   decode_config->ctc_prefix_search_opts.second_beam_size = FLAGS_nbest;
   decode_config->use_confidence_reward = FLAGS_use_confidence_reward;
+  decode_config->bonus_weight = FLAGS_bonus_weight;
+  decode_config->confidence_floor = FLAGS_confidence_floor;
   return decode_config;
 }
 
@@ -288,6 +303,8 @@ std::shared_ptr<DecodeResource> InitDecodeResourceFromFlags() {
   if (!FLAGS_hotword_path.empty() && !FLAGS_pinyin_dict_path.empty()) {
       LOG(INFO) << "Initializing hotword corrector...";
       HotwordCorrection::PinyinProvider::initialize(FLAGS_pinyin_dict_path);
+      HotwordCorrection::SetNeighborThreshold(FLAGS_neighbor_threshold);
+      HotwordCorrection::LoadConfusionMatrix(FLAGS_confusion_matrix_path);
 
       if (!FLAGS_cmu_dict_path.empty()) {
           LOG(INFO) << "Initializing English G2P with: " << FLAGS_cmu_dict_path;

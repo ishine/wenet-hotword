@@ -1,8 +1,0 @@
-# held-out eval of /home/sakuya/userspace/wenet/wenet-main/runtime/libtorch/configs/default.tuned.yaml on /home/sakuya/userspace/wenet/aishell1_indep_hotword
-# tune set: /home/sakuya/userspace/wenet/aishell_test (knee F1=82.82% CER=8.37%)
-F1=88.07
-CER=9.05
-recall=79.26
-precision=99.07
-true_positives=107
-wall_s=27

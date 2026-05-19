@@ -66,6 +66,17 @@ struct DecodeOptions {
   // back to the unweighted match score (correct). Used to ablate the
   // "acoustic confidence reward" optimization.
   bool use_confidence_reward = true;
+
+  // Master bonus weight for hotword corrections (CalculateMatchBonus). It is
+  // the multiplier in front of `match.score * length_factor`. Increasing it
+  // pushes more hotword candidates above the rescoring threshold (raises R,
+  // risks raising FP); decreasing it does the inverse.
+  float bonus_weight = 2.0f;
+
+  // Lower bound on the confidence used to divide the bonus. Lower values let
+  // low-confidence regions get larger amplification; higher values flatten
+  // the confidence reward back toward a uniform bonus.
+  float confidence_floor = 0.4f;
 };
 
 struct WordPiece {
