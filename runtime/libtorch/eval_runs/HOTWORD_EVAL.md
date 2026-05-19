@@ -226,6 +226,20 @@ Tune set：+31.03 pp F1，−3.67 pp CER。Held-out：+24.30 pp F1，−3.05 pp 
 
 ---
 
+## 跨模型验证
+
+同一热词 pipeline 在两个 WeNet 模型上的对比（AISHELL-1 hotword test, 235 utts）。
+
+| 条件 | u2pp<br>CER% / recall% | multi_cn<br>CER% / recall% |
+|------|------------------------|---------------------------|
+| A_baseline | 14.20 / 15.96 | 4.28 / 74.11 |
+| G_wenet_native | 10.97 / 46.45 | 2.34 / 91.49 |
+| F_autotune | 8.37 / 72.70 | 2.02 / 95.74 |
+
+multi_cn 为 unidirectional decoder（11008 units），autotune 时 `reverse_weight` 锁 0.0。
+
+---
+
 ## 扩展到其他数据集/模型
 
 上述数值特定于 `u2pp_conformer-asr-cn-16k-online` × AISHELL-hotwords。迁移步骤：

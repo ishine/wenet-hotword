@@ -39,8 +39,19 @@
 
 ```bash
 cd /path/to/wenet-main
+
+# Create and activate virtual environment
+uv venv .venv --python 3.12
 source .venv/bin/activate
-pip install pyyaml dacite optuna
+
+# Install PyTorch (adjust CUDA version as needed)
+uv pip install torch torchaudio \
+  --index-url https://download.pytorch.org/whl/cu121 \
+  --extra-index-url https://pypi.tuna.tsinghua.edu.cn/simple
+
+# Install remaining dependencies
+uv pip install pyyaml dacite optuna soundfile pypinyin \
+  -i https://pypi.tuna.tsinghua.edu.cn/simple
 ```
 
 ### 2. Download model + test set
@@ -50,6 +61,17 @@ modelscope download --model wenet/u2pp_conformer-asr-cn-16k-online \
   --local_dir ~/userspace/wenet/models/u2pp_conformer-asr-cn-16k-online
 bash tools/prepare_aishell_hotwords.sh ~/userspace/wenet/aishell_test
 ```
+
+> **Other models (optional)**
+>
+> Verified models and download commands:
+>
+> | Model | ModelScope ID |
+> |------|--------------|
+> | `u2pp_conformer-asr-cn-16k-online` (default) | `wenet/u2pp_conformer-asr-cn-16k-online` |
+> | `multi_cn` | `wenet/multi_cn` |
+>
+> After switching models, re-run Step 5 (confusion matrix) and Step 6 (autotune).
 
 ### 3. Build decoder_main
 
@@ -75,10 +97,16 @@ runtime/libtorch/build/bin/decoder_main \
 
 ### 5. Prepare confusion matrix
 
-The confusion matrix is model-specific. For the example model:
+The confusion matrix is learned from **this model's** CTC posteriors and is not portable across models.
+
+For the example model, run on a development set (e.g. WeNetSpeech dev):
 ```bash
-cp runtime/libtorch/configs/confusion.wenetspeech.csv \
-   runtime/libtorch/configs/confusion.csv
+python3 tools/learn_confusion.py \
+  --model_dir ~/userspace/wenet/models/u2pp_conformer-asr-cn-16k-online \
+  --wav_scp    ~/userspace/wenet/wenetspeech_calibration/dev/wav.scp \
+  --text       ~/userspace/wenet/wenetspeech_calibration/dev/text \
+  --out_csv    runtime/libtorch/configs/confusion.csv \
+  --device     cpu
 ```
 
 ### 6. Autotune
@@ -193,6 +221,7 @@ wenet-main/
 
 - **[WeNet](https://github.com/wenet-e2e/wenet)** — base ASR runtime.
 - **[cpp-pinyin](https://github.com/wolfgitpr/cpp-pinyin)** — runtime G2P.
+- **[CapsWriter-Offline](https://github.com/HaujetZhao/CapsWriter-Offline)** — inspired the corrector design.
 
 ---
 
