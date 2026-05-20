@@ -141,8 +141,9 @@ class AsrDecoder {
   void Rescoring();
   void AppendPath();
   float CalculateMatchBonus(const HotwordCorrection::MatchResult& match);
-  std::string ApplyMatchesToSentence(const std::string& original, 
-                                   std::vector<HotwordCorrection::MatchResult> matches);
+  std::string ApplyMatchesToSentence(
+      const std::string& original,
+      std::vector<HotwordCorrection::MatchResult> matches);
   void Reset();
   void ResetContinuousDecoding();
   bool DecodedSomething() const {

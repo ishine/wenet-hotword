@@ -573,12 +573,16 @@ def main() -> int:
         # Update best metrics
         completed = len([tr for tr in study.trials
                         if tr.state == optuna.trial.TrialState.COMPLETE])
-        best_recall = max((tr.values[0] for tr in study.trials
-                          if tr.state == optuna.trial.TrialState.COMPLETE
-                          and tr.values is not None), default=0.0)
-        best_cer = min((tr.values[1] for tr in study.trials
-                       if tr.state == optuna.trial.TrialState.COMPLETE
-                       and tr.values is not None), default=999.0)
+        best_recall = max(
+            (tr.values[0] for tr in study.trials
+             if tr.state == optuna.trial.TrialState.COMPLETE
+             and tr.values is not None),
+            default=0.0)
+        best_cer = min(
+            (tr.values[1] for tr in study.trials
+             if tr.state == optuna.trial.TrialState.COMPLETE
+             and tr.values is not None),
+            default=999.0)
         pareto = study.best_trials if hasattr(study, 'best_trials') else []
         _write_status(trial.number, completed, best_recall, best_cer,
                      len(pareto), t.wall_s)
@@ -684,7 +688,7 @@ def main() -> int:
                              f"P floor relaxed)")
             elif scored:
                 best_pair = min(scored, key=lambda pr: pr[1].cer)
-                pick_mode = f"held-out fallback (every Pareto blew CER cap; min CER)"
+                pick_mode = "held-out fallback (every Pareto blew CER cap; min CER)"
             else:
                 best_pair = None
         else:
@@ -693,7 +697,7 @@ def main() -> int:
                 pick_mode = f"held-out knee (R↑ under CER ≤ {cer_baseline:.2f})"
             elif scored:
                 best_pair = min(scored, key=lambda pr: pr[1].cer)
-                pick_mode = f"held-out fallback (every Pareto blew CER cap; min CER)"
+                pick_mode = "held-out fallback (every Pareto blew CER cap; min CER)"
             else:
                 best_pair = None
         if best_pair is not None:
