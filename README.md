@@ -121,7 +121,24 @@ python3 tools/autotune.py \
   --search-space runtime/libtorch/configs/search_space.yaml
 ```
 
-### 7. Run ablations
+Autotune writes the best configuration to `runtime/libtorch/configs/default.tuned.yaml`.
+
+### 7. Evaluate on test set with tuned config
+
+Evaluate the tuned configuration on the **held-out test set** to reproduce the headline numbers (R≈91%, CER≈7.3%):
+
+```bash
+TUNED_YAML=runtime/libtorch/configs/default.tuned.yaml \
+TESTSET=~/userspace/wenet/aishell1_indep_hotword \
+bash runtime/libtorch/eval_runs/run_ablations.sh
+column -ts $'\t' runtime/libtorch/eval_runs/summary.tsv
+```
+
+`run_ablations.sh` automatically loads the tuned config for the **F_autotune** condition, and also runs baseline (A) and upstream native (G) for comparison. The `F_autotune` row in the summary gives the final test-set result.
+
+### 8. Run full ablations on tune set (optional)
+
+To reproduce the full ablation ladder (A→F) on the tune set, run without setting `TESTSET` (defaults to the tune set):
 
 ```bash
 bash runtime/libtorch/eval_runs/run_ablations.sh
