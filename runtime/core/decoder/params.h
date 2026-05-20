@@ -107,9 +107,20 @@ DEFINE_double(bonus_weight, 2.0,
 DEFINE_double(confidence_floor, 0.4,
               "lower bound used when dividing the bonus by avg_confidence; "
               "controls how much amplification low-confidence regions get.");
+DEFINE_double(bonus_length_scale, 0.5,
+              "linear scaling factor for hotword length bonus: "
+              "length_factor = bonus_length_scale * char_len. "
+              "default 0.5 approximates old log2 behaviour for short words.");
 DEFINE_double(neighbor_threshold, 0.5,
               "phoneme-distance cutoff used by FastRAG when generating "
               "candidate neighbors from the dense confusion matrix.");
+DEFINE_double(fuzzy_reject_ratio, 0.8,
+              "edit-distance rejection ratio in fuzzy_substring_search_* "
+              "(dist >= n * ratio is discarded).");
+DEFINE_double(confidence_weight_min, 0.2,
+              "lower bound on the confidence weight in "
+              "fuzzy_substring_search_constrained_with_confidence "
+              "(weight = min + (1-min) * confidence).");
 
 // SymbolTable flags
 DEFINE_string(dict_path, "",
@@ -170,6 +181,7 @@ std::shared_ptr<DecodeOptions> InitDecodeOptionsFromFlags() {
   decode_config->use_confidence_reward = FLAGS_use_confidence_reward;
   decode_config->bonus_weight = FLAGS_bonus_weight;
   decode_config->confidence_floor = FLAGS_confidence_floor;
+  decode_config->bonus_length_scale = FLAGS_bonus_length_scale;
   return decode_config;
 }
 
@@ -304,6 +316,8 @@ std::shared_ptr<DecodeResource> InitDecodeResourceFromFlags() {
       LOG(INFO) << "Initializing hotword corrector...";
       HotwordCorrection::PinyinProvider::initialize(FLAGS_pinyin_dict_path);
       HotwordCorrection::SetNeighborThreshold(FLAGS_neighbor_threshold);
+      HotwordCorrection::SetFuzzyRejectRatio(FLAGS_fuzzy_reject_ratio);
+      HotwordCorrection::SetConfidenceWeightMin(FLAGS_confidence_weight_min);
       HotwordCorrection::LoadConfusionMatrix(FLAGS_confusion_matrix_path);
 
       if (!FLAGS_cmu_dict_path.empty()) {

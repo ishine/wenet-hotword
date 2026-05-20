@@ -76,6 +76,12 @@ hotword:
   # (only used at corrector init time, before LoadConfusionMatrix builds
   # `g_dense_neighbors`).
   neighbor_threshold: 0.5
+  # Edit-distance rejection ratio in fuzzy_substring_search_* (was 0.8f).
+  fuzzy_reject_ratio: 0.8
+  # Confidence-weight lower bound in weighted edit distance (was 0.2f).
+  confidence_weight_min: 0.2
+  # Linear scaling factor for hotword length bonus (replaces log2).
+  bonus_length_scale: 0.5
 
 runtime:
   thread_num: 0                              # 0 = auto (use nproc)

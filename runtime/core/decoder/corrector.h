@@ -30,6 +30,15 @@ void LoadConfusionMatrix(const std::string& path);
 // Caller responsibility: invoke once at init time, no thread safety.
 void SetNeighborThreshold(float thr);
 
+// Override the edit-distance rejection ratio in fuzzy_substring_search_*
+// (default 0.8f).  Matches with dist >= n * ratio are discarded.
+void SetFuzzyRejectRatio(float ratio);
+
+// Override the confidence-weight lower bound in
+// fuzzy_substring_search_constrained_with_confidence (default 0.2f).
+// weight = min + (1.0 - min) * confidence.
+void SetConfidenceWeightMin(float min);
+
 enum class Lang { ZH, EN, NUM, OTHER };
 
 struct Phoneme {

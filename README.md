@@ -12,16 +12,20 @@
 
 
 
-**recall ↑ 4.6×** &nbsp;&nbsp; **CER ↓ 41%**
+**tune set** (235 utts): recall ↑ 5.6× &nbsp;&nbsp; CER ↓ 55%
+<br>
+**test set** (115 utts): recall ↑ 3.5× &nbsp;&nbsp; CER ↓ 47%
 
-| | baseline | ours (autotuned) |
-|--|:--:|:--:|
-| hotword recall | 15.96% | **72.70%** |
-| CER | 14.20% | **8.37%** |
+| | baseline (tune) | baseline (test) | ours (tune) | ours (test) |
+|--|:--:|:--:|:--:|:--:|
+| hotword recall | 15.96% | 25.93% | **90.07%** | **91.11%** |
+| CER | 14.20% | 13.76% | **6.32%** | **7.33%** |
 
 <sub>Model: `wenet/u2pp_conformer-asr-cn-16k-online`</sub>
 <br>
-<sub>Dataset: AISHELL-1 hotword test</sub>
+<sub>Tune: `AISHELL-1 hotword test` &nbsp;&nbsp;</sub>
+<br>
+<sub>Test: `aishell1_indep_hotword`</sub>
 
 
 ## 🌟 Features
@@ -29,7 +33,7 @@
 - **Phoneme Corrector** — fuzzy hotword matching via G2P phoneme edit-distance on the n-best.
 - **Confidence-Weighted Match Bonus** — per-hotword reward scaled by acoustic confidence.
 - **LRU Hotword Cache** — recurring hotwords get a lowered fuzzy threshold in streaming.
-- **Multi-Objective Autotuner** — Optuna TPE over decoder + hotword knobs, optimizing recall and CER jointly.
+- **Multi-Objective Autotuner** — Optuna TPE over decoder + hotword knobs, optimizing recall and CER jointly with early-exit stagnation detection.
 
 ---
 
@@ -117,7 +121,24 @@ python3 tools/autotune.py \
   --search-space runtime/libtorch/configs/search_space.yaml
 ```
 
-### 7. Run ablations
+Autotune writes the best configuration to `runtime/libtorch/configs/default.tuned.yaml`.
+
+### 7. Evaluate on test set with tuned config
+
+Evaluate the tuned configuration on the **held-out test set** to reproduce the headline numbers (R≈91%, CER≈7.3%):
+
+```bash
+TUNED_YAML=runtime/libtorch/configs/default.tuned.yaml \
+TESTSET=~/userspace/wenet/aishell1_indep_hotword \
+bash runtime/libtorch/eval_runs/run_ablations.sh
+column -ts $'\t' runtime/libtorch/eval_runs/summary.tsv
+```
+
+`run_ablations.sh` automatically loads the tuned config for the **F_autotune** condition, and also runs baseline (A) and upstream native (G) for comparison. The `F_autotune` row in the summary gives the final test-set result.
+
+### 8. Run full ablations on tune set (optional)
+
+To reproduce the full ablation ladder (A→F) on the tune set, run without setting `TESTSET` (defaults to the tune set):
 
 ```bash
 bash runtime/libtorch/eval_runs/run_ablations.sh
@@ -155,6 +176,9 @@ hotword:
   bonus_weight:          2.0
   confidence_floor:      0.4
   neighbor_threshold:    0.5
+  fuzzy_reject_ratio:    0.8
+  confidence_weight_min: 0.2
+  bonus_length_scale:    0.5
 
 autotune:
   n_trials:  100
@@ -176,18 +200,17 @@ Search space: `runtime/libtorch/configs/search_space.yaml`.
 | B_phoneme | + phoneme corrector (G2P + fuzzy match) | 12.62 | 32.62 | 98.92 | 49.07 |
 | D_confidence | + confidence-weighted match bonus | 12.04 | 36.17 | 99.03 | 52.99 |
 | E_cache | + LRU hotword cache | 12.04 | 36.17 | 99.03 | 52.99 |
-| F_autotune | E_cache + TPE-autotuned knobs (11 params) | 8.37 | 72.70 | 99.51 | 84.02 |
+| F_autotune | E_cache + TPE-autotuned knobs (12 params) | 6.32 | 90.07 | 96.21 | 93.04 |
 | G_wenet_native | Upstream WeNet character-FST biasing only | 10.97 | 46.45 | 99.24 | 63.29 |
-| FG_stacked | F_autotune + G_wenet_native layered together | 8.48 | 73.76 | 97.20 | 83.87 |
+
 
 **Held-out** (`aishell1_indep_hotword`, 115 utts — never seen during tuning):
 
 | Condition | CER% | recall% | precision% | F1% |
 |-----------|------:|--------:|-----------:|----:|
 | D_confidence | 11.88 | 48.15 | 98.48 | 64.68 |
-| F_autotune | 8.83 | 80.74 | 99.09 | 88.98 |
+| F_autotune | 7.33 | 91.11 | 98.40 | 94.62 |
 | G_wenet_native | 10.49 | 59.26 | 98.77 | 74.07 |
-| FG_stacked | 8.89 | 80.74 | 97.32 | 88.26 |
 
 Full write-up: [`HOTWORD_EVAL.md`](runtime/libtorch/eval_runs/HOTWORD_EVAL.md)
 
@@ -206,8 +229,7 @@ wenet-main/
 ├── runtime/core/bin/
 │   └── decoder_main.cc         # decoder binary (+ daemon mode for autotune)
 ├── runtime/libtorch/configs/
-│   ├── default.yaml            # base config
-│   ├── default.yaml            # base config (includes 11-knob autotune)
+│   ├── default.yaml            # base config (includes 12-knob autotune)
 │   └── search_space.yaml       # Optuna search space
 ├── runtime/libtorch/eval_runs/
 │   ├── run_ablations.sh        # A→G ablation runner

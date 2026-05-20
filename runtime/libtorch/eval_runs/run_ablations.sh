@@ -140,6 +140,9 @@ print(f"--use_confidence_reward={'true' if h.use_confidence_reward else 'false'}
 print(f"--bonus_weight={h.bonus_weight}")
 print(f"--confidence_floor={h.confidence_floor}")
 print(f"--neighbor_threshold={h.neighbor_threshold}")
+print(f"--fuzzy_reject_ratio={h.fuzzy_reject_ratio}")
+print(f"--confidence_weight_min={h.confidence_weight_min}")
+print(f"--bonus_length_scale={h.bonus_length_scale}")
 if h.confusion_matrix_path:
     print(f"--confusion_matrix_path={h.confusion_matrix_path}")
 PY

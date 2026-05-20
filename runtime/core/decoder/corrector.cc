@@ -32,6 +32,8 @@ std::unordered_map<std::string, std::vector<std::string>> g_dense_neighbors;
 constexpr float kDefaultNeighborThreshold = 0.5f;
 float g_neighbor_threshold =
     kDefaultNeighborThreshold;  // for candidate index expansion
+float g_fuzzy_reject_ratio = 0.8f;
+float g_confidence_weight_min = 0.2f;
 
 enum class PhonemeClass { kInitial, kFinal, kTone, kOther };
 
@@ -59,6 +61,14 @@ void trim_inplace(std::string& s) {
 
 void SetNeighborThreshold(float thr) {
   g_neighbor_threshold = std::max(0.0f, std::min(1.0f, thr));
+}
+
+void SetFuzzyRejectRatio(float ratio) {
+  g_fuzzy_reject_ratio = std::max(0.0f, std::min(1.0f, ratio));
+}
+
+void SetConfidenceWeightMin(float min) {
+  g_confidence_weight_min = std::max(0.0f, std::min(1.0f, min));
 }
 
 void LoadConfusionMatrix(const std::string& path) {
@@ -531,7 +541,7 @@ std::vector<std::tuple<float, int, int>> fuzzy_substring_search_constrained(
   for (int j = 1; j <= m; ++j) {
     if (!input_info[j - 1].is_word_end) continue;
     float dist = dp[n][j];
-    if (dist >= n * 0.8f) continue;
+    if (dist >= n * g_fuzzy_reject_ratio) continue;
     float score = 1.0f - (dist / n);
     if (score >= threshold) {
       int start_idx = path_start[n][j];
@@ -579,8 +589,8 @@ fuzzy_substring_search_constrained_with_confidence(
 
       if (!token_confidences.empty() && j - 1 < token_confidences.size()) {
         float confidence = std::exp(token_confidences[j - 1]);
-        float weight = 0.2f + 0.8f * confidence;
-        weight = std::max(0.1f, std::min(1.0f, weight));
+        float weight = g_confidence_weight_min +
+                       (1.0f - g_confidence_weight_min) * confidence;
         weighted_cost = base_cost * weight;
       }
 
@@ -604,7 +614,7 @@ fuzzy_substring_search_constrained_with_confidence(
   for (int j = 1; j <= m; ++j) {
     if (!input_info[j - 1].is_word_end) continue;
     float dist = dp[n][j];
-    if (dist >= n * 0.8f) continue;
+    if (dist >= n * g_fuzzy_reject_ratio) continue;
     float score = 1.0f - (dist / n);
     if (score >= threshold) {
       int start_idx = path_start[n][j];
