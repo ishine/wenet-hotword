@@ -107,6 +107,10 @@ DEFINE_double(bonus_weight, 2.0,
 DEFINE_double(confidence_floor, 0.4,
               "lower bound used when dividing the bonus by avg_confidence; "
               "controls how much amplification low-confidence regions get.");
+DEFINE_double(bonus_length_scale, 0.5,
+              "linear scaling factor for hotword length bonus: "
+              "length_factor = bonus_length_scale * char_len. "
+              "default 0.5 approximates old log2 behaviour for short words.");
 DEFINE_double(neighbor_threshold, 0.5,
               "phoneme-distance cutoff used by FastRAG when generating "
               "candidate neighbors from the dense confusion matrix.");
@@ -177,6 +181,7 @@ std::shared_ptr<DecodeOptions> InitDecodeOptionsFromFlags() {
   decode_config->use_confidence_reward = FLAGS_use_confidence_reward;
   decode_config->bonus_weight = FLAGS_bonus_weight;
   decode_config->confidence_floor = FLAGS_confidence_floor;
+  decode_config->bonus_length_scale = FLAGS_bonus_length_scale;
   return decode_config;
 }
 

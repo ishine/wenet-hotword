@@ -77,6 +77,11 @@ struct DecodeOptions {
   // low-confidence regions get larger amplification; higher values flatten
   // the confidence reward back toward a uniform bonus.
   float confidence_floor = 0.4f;
+
+  // Linear scaling factor for the hotword length bonus.
+  // length_factor = bonus_length_scale * char_len.
+  // Default 0.5 approximates the old log2 behaviour for short words.
+  float bonus_length_scale = 0.5f;
 };
 
 struct WordPiece {

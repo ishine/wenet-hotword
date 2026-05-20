@@ -55,6 +55,13 @@ space:
     type: float
     low: 0.1
     high: 0.5
+  # Linear scaling factor for hotword length bonus (replaces log2).
+  # 0.3 ≈ short words favoured; 0.8 ≈ long words favoured.
+  # Previous hardcoded behaviour was log2 ≈ 0.5 for 2-char words.
+  hotword.bonus_length_scale:
+    type: float
+    low: 0.2
+    high: 0.8
   # CalculateMatchBonus master multiplier. 0.5 ≈ "barely bias", 4.0 ≈
   # "FP explosion likely". The previous hardcoded value was 2.0.
   hotword.bonus_weight:

@@ -252,6 +252,8 @@ class HotwordConfig:
     fuzzy_reject_ratio: float = 0.8
     # Confidence-weight lower bound in weighted edit distance (was 0.2f).
     confidence_weight_min: float = 0.2
+    # Linear scaling factor for hotword length bonus (replaces log2).
+    bonus_length_scale: float = 0.5
 
 
 @dataclass
@@ -367,6 +369,7 @@ class DecoderConfig:
                 "--neighbor_threshold", str(h.neighbor_threshold),
                 "--fuzzy_reject_ratio", str(h.fuzzy_reject_ratio),
                 "--confidence_weight_min", str(h.confidence_weight_min),
+                "--bonus_length_scale", str(h.bonus_length_scale),
                 f"--enable_hotword_cache={'true' if h.enable_hotword_cache else 'false'}",
             ]
             if h.confusion_matrix_path:

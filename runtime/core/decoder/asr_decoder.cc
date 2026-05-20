@@ -161,7 +161,7 @@ float AsrDecoder::CalculateMatchBonus(
   std::vector<std::string> chars;
   wenet::SplitUTF8StringToChars(match.hotword, &chars);
   int char_len = chars.size();
-  float length_factor = std::log2(std::max(2, char_len));
+  float length_factor = opts_.bonus_length_scale * char_len;
 
   float base_bonus = opts_.bonus_weight * match.score * length_factor;
   float safe_divisor = std::max(opts_.confidence_floor, match.avg_confidence);

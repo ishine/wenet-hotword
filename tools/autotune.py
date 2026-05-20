@@ -144,6 +144,7 @@ def _cfg_to_daemon_params(cfg: DecoderConfig) -> Dict[str, Any]:
         "neighbor_threshold": h.neighbor_threshold,
         "fuzzy_reject_ratio": h.fuzzy_reject_ratio,
         "confidence_weight_min": h.confidence_weight_min,
+        "bonus_length_scale": h.bonus_length_scale,
         "hotword_path": hotword_path,
         "confusion_matrix_path": _expand(h.confusion_matrix_path, REPO_ROOT),
         "enable_hotword_cache": h.enable_hotword_cache,
@@ -322,6 +323,43 @@ def _compute_hotword_metrics(ref: str, hyp: str, hotwords: str,
 # multi-objective objective; we report worst-possible values so the trial is
 # dominated on the Pareto front but the study keeps moving.
 _FAIL_R, _FAIL_CER = -1.0, 1e6
+
+
+class ParetoStagnationStopper:
+    """Stop optimization when the Pareto front has not been updated for a
+    consecutive window of `patience` completed trials.
+
+    For a multi-objective study (recall↑, CER↓), this signals that the
+    sampler has saturated the search space and further trials are unlikely
+    to yield new Pareto-optimal points.
+    """
+    def __init__(self, patience: int = 40, max_trials: int = 300):
+        self.patience = patience
+        self.max_trials = max_trials
+
+    def __call__(self, study: optuna.Study, trial: optuna.Trial) -> None:
+        if trial.number >= self.max_trials:
+            print(f"[stopper] hard limit {self.max_trials} reached; stopping.")
+            study.stop()
+            return
+
+        completed = [
+            t for t in study.trials
+            if t.state == optuna.trial.TrialState.COMPLETE
+        ]
+        if len(completed) < self.patience:
+            return
+
+        recent = completed[-self.patience:]
+        recent_ids = {t.number for t in recent}
+
+        # study.best_trials is the Pareto front over ALL completed trials
+        pareto_ids = {t.number for t in study.best_trials}
+
+        if not (recent_ids & pareto_ids):
+            print(f"[stopper] no Pareto update in last {self.patience} trials; "
+                  f"stopping at trial {trial.number}.")
+            study.stop()
 
 
 def _build_sampler(name: str, seed: int) -> optuna.samplers.BaseSampler:
@@ -550,9 +588,11 @@ def main() -> int:
     if remaining == 0:
         print(f"[info] study already has {done_before} ≥ n_trials={n_trials}; skipping optimize")
     else:
+        stopper = ParetoStagnationStopper(patience=40, max_trials=300)
         try:
             study.optimize(objective, n_trials=remaining,
-                           n_jobs=args.n_jobs, gc_after_trial=True)
+                           n_jobs=args.n_jobs, gc_after_trial=True,
+                           callbacks=[stopper])
         except KeyboardInterrupt:
             print("\n[warn] interrupted — partial study preserved at "
                   f"{study_db}", file=sys.stderr)

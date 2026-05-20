@@ -136,6 +136,7 @@ struct DaemonFlagDefaults {
   double bonus_weight, confidence_floor, neighbor_threshold;
   double fuzzy_threshold, fuzzy_threshold_en;
   double fuzzy_reject_ratio, confidence_weight_min;
+  double bonus_length_scale;
   int nbest, max_append_path, chunk_size, num_left_chunks;
   bool use_confidence_reward, enable_hotword_cache;
   std::string hotword_path, confusion_matrix_path, result, wav_scp;
@@ -150,6 +151,7 @@ static void SaveDaemonDefaults() {
   g_daemon_defaults.length_penalty = FLAGS_length_penalty;
   g_daemon_defaults.bonus_weight = FLAGS_bonus_weight;
   g_daemon_defaults.confidence_floor = FLAGS_confidence_floor;
+  g_daemon_defaults.bonus_length_scale = FLAGS_bonus_length_scale;
   g_daemon_defaults.neighbor_threshold = FLAGS_neighbor_threshold;
   g_daemon_defaults.fuzzy_reject_ratio = FLAGS_fuzzy_reject_ratio;
   g_daemon_defaults.confidence_weight_min = FLAGS_confidence_weight_min;
@@ -174,6 +176,7 @@ static void ResetDaemonFlags() {
   FLAGS_length_penalty = g_daemon_defaults.length_penalty;
   FLAGS_bonus_weight = g_daemon_defaults.bonus_weight;
   FLAGS_confidence_floor = g_daemon_defaults.confidence_floor;
+  FLAGS_bonus_length_scale = g_daemon_defaults.bonus_length_scale;
   FLAGS_neighbor_threshold = g_daemon_defaults.neighbor_threshold;
   FLAGS_fuzzy_reject_ratio = g_daemon_defaults.fuzzy_reject_ratio;
   FLAGS_confidence_weight_min = g_daemon_defaults.confidence_weight_min;
@@ -221,6 +224,8 @@ static void ApplyDaemonParams(const json::JSON& params) {
     FLAGS_bonus_weight = params.at("bonus_weight").ToFloat();
   if (params.hasKey("confidence_floor"))
     FLAGS_confidence_floor = params.at("confidence_floor").ToFloat();
+  if (params.hasKey("bonus_length_scale"))
+    FLAGS_bonus_length_scale = params.at("bonus_length_scale").ToFloat();
   if (params.hasKey("neighbor_threshold"))
     FLAGS_neighbor_threshold = params.at("neighbor_threshold").ToFloat();
   if (params.hasKey("fuzzy_reject_ratio"))
