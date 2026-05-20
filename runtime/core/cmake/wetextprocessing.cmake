@@ -2,11 +2,9 @@ if(NOT ANDROID)
   if(NOT DEFINED WENET_GH_MIRROR)
     set(WENET_GH_MIRROR "https://gh-proxy.com/https://github.com")
   endif()
-  # Tarball over HTTPS instead of git protocol: gh-proxy.com rate-limits git RPC
-  # (HTTP 429) but serves /archive/*.tar.gz fine. SHA pins to the revision the
-  # current decoder code was built against.
   FetchContent_Declare(wetextprocessing
-    URL ${WENET_GH_MIRROR}/wenet-e2e/WeTextProcessing/archive/bb145729c903fac2d9fddf6b9077f352f3fc2816.tar.gz
+    GIT_REPOSITORY ${WENET_GH_MIRROR}/wenet-e2e/WeTextProcessing.git
+    GIT_TAG        origin/master
   )
   FetchContent_MakeAvailable(wetextprocessing)
   include_directories(${wetextprocessing_SOURCE_DIR}/runtime)
