@@ -24,10 +24,6 @@ space:
     type: float
     low: 0.2
     high: 0.8
-  decode.reverse_weight:
-    type: float
-    low: 0.0
-    high: 0.5
   decode.length_penalty:
     type: float
     low: -1.0
@@ -47,11 +43,18 @@ space:
   hotword.max_append_path:
     type: categorical
     choices: [10, 20]
-  hotword.use_confidence_reward:
-    type: categorical
-    choices: [true, false]
-
   # --- newly exposed knobs (were hardcoded in C++) ---
+  # Edit-distance rejection ratio in fuzzy_substring_search_*. Lower = stricter.
+  hotword.fuzzy_reject_ratio:
+    type: float
+    low: 0.5
+    high: 0.95
+  # Confidence-weight lower bound in weighted edit distance. Higher = less
+  # discount for low-confidence tokens (more conservative).
+  hotword.confidence_weight_min:
+    type: float
+    low: 0.1
+    high: 0.5
   # CalculateMatchBonus master multiplier. 0.5 ≈ "barely bias", 4.0 ≈
   # "FP explosion likely". The previous hardcoded value was 2.0.
   hotword.bonus_weight:

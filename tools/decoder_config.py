@@ -248,6 +248,10 @@ class HotwordConfig:
     confidence_floor: float = 0.4
     # FastRAG neighbor-distance cutoff (was hardcoded kNeighborThreshold=0.5f).
     neighbor_threshold: float = 0.5
+    # Edit-distance rejection ratio in fuzzy_substring_search_* (was 0.8f).
+    fuzzy_reject_ratio: float = 0.8
+    # Confidence-weight lower bound in weighted edit distance (was 0.2f).
+    confidence_weight_min: float = 0.2
 
 
 @dataclass
@@ -361,7 +365,8 @@ class DecoderConfig:
                 "--bonus_weight", str(h.bonus_weight),
                 "--confidence_floor", str(h.confidence_floor),
                 "--neighbor_threshold", str(h.neighbor_threshold),
-                f"--use_confidence_reward={'true' if h.use_confidence_reward else 'false'}",
+                "--fuzzy_reject_ratio", str(h.fuzzy_reject_ratio),
+                "--confidence_weight_min", str(h.confidence_weight_min),
                 f"--enable_hotword_cache={'true' if h.enable_hotword_cache else 'false'}",
             ]
             if h.confusion_matrix_path:

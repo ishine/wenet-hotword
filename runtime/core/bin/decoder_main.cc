@@ -135,6 +135,7 @@ struct DaemonFlagDefaults {
   double ctc_weight, rescoring_weight, reverse_weight, length_penalty;
   double bonus_weight, confidence_floor, neighbor_threshold;
   double fuzzy_threshold, fuzzy_threshold_en;
+  double fuzzy_reject_ratio, confidence_weight_min;
   int nbest, max_append_path, chunk_size, num_left_chunks;
   bool use_confidence_reward, enable_hotword_cache;
   std::string hotword_path, confusion_matrix_path, result, wav_scp;
@@ -150,6 +151,8 @@ static void SaveDaemonDefaults() {
   g_daemon_defaults.bonus_weight = FLAGS_bonus_weight;
   g_daemon_defaults.confidence_floor = FLAGS_confidence_floor;
   g_daemon_defaults.neighbor_threshold = FLAGS_neighbor_threshold;
+  g_daemon_defaults.fuzzy_reject_ratio = FLAGS_fuzzy_reject_ratio;
+  g_daemon_defaults.confidence_weight_min = FLAGS_confidence_weight_min;
   g_daemon_defaults.fuzzy_threshold = FLAGS_fuzzy_threshold;
   g_daemon_defaults.fuzzy_threshold_en = FLAGS_fuzzy_threshold_en;
   g_daemon_defaults.nbest = FLAGS_nbest;
@@ -172,6 +175,8 @@ static void ResetDaemonFlags() {
   FLAGS_bonus_weight = g_daemon_defaults.bonus_weight;
   FLAGS_confidence_floor = g_daemon_defaults.confidence_floor;
   FLAGS_neighbor_threshold = g_daemon_defaults.neighbor_threshold;
+  FLAGS_fuzzy_reject_ratio = g_daemon_defaults.fuzzy_reject_ratio;
+  FLAGS_confidence_weight_min = g_daemon_defaults.confidence_weight_min;
   FLAGS_fuzzy_threshold = g_daemon_defaults.fuzzy_threshold;
   FLAGS_fuzzy_threshold_en = g_daemon_defaults.fuzzy_threshold_en;
   FLAGS_nbest = g_daemon_defaults.nbest;
@@ -218,6 +223,10 @@ static void ApplyDaemonParams(const json::JSON& params) {
     FLAGS_confidence_floor = params.at("confidence_floor").ToFloat();
   if (params.hasKey("neighbor_threshold"))
     FLAGS_neighbor_threshold = params.at("neighbor_threshold").ToFloat();
+  if (params.hasKey("fuzzy_reject_ratio"))
+    FLAGS_fuzzy_reject_ratio = params.at("fuzzy_reject_ratio").ToFloat();
+  if (params.hasKey("confidence_weight_min"))
+    FLAGS_confidence_weight_min = params.at("confidence_weight_min").ToFloat();
   if (params.hasKey("hotword_path"))
     FLAGS_hotword_path = params.at("hotword_path").ToString();
   if (params.hasKey("confusion_matrix_path"))
@@ -248,6 +257,8 @@ static std::shared_ptr<wenet::DecodeResource> BuildTrialResource(
   if (!FLAGS_hotword_path.empty() && !FLAGS_pinyin_dict_path.empty()) {
     HotwordCorrection::PinyinProvider::initialize(FLAGS_pinyin_dict_path);
     HotwordCorrection::SetNeighborThreshold(FLAGS_neighbor_threshold);
+    HotwordCorrection::SetFuzzyRejectRatio(FLAGS_fuzzy_reject_ratio);
+    HotwordCorrection::SetConfidenceWeightMin(FLAGS_confidence_weight_min);
     HotwordCorrection::LoadConfusionMatrix(FLAGS_confusion_matrix_path);
     if (!FLAGS_cmu_dict_path.empty()) {
       HotwordCorrection::EnglishProvider::initialize(FLAGS_cmu_dict_path);

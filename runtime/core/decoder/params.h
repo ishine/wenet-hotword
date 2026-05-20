@@ -110,6 +110,13 @@ DEFINE_double(confidence_floor, 0.4,
 DEFINE_double(neighbor_threshold, 0.5,
               "phoneme-distance cutoff used by FastRAG when generating "
               "candidate neighbors from the dense confusion matrix.");
+DEFINE_double(fuzzy_reject_ratio, 0.8,
+              "edit-distance rejection ratio in fuzzy_substring_search_* "
+              "(dist >= n * ratio is discarded).");
+DEFINE_double(confidence_weight_min, 0.2,
+              "lower bound on the confidence weight in "
+              "fuzzy_substring_search_constrained_with_confidence "
+              "(weight = min + (1-min) * confidence).");
 
 // SymbolTable flags
 DEFINE_string(dict_path, "",
@@ -304,6 +311,8 @@ std::shared_ptr<DecodeResource> InitDecodeResourceFromFlags() {
       LOG(INFO) << "Initializing hotword corrector...";
       HotwordCorrection::PinyinProvider::initialize(FLAGS_pinyin_dict_path);
       HotwordCorrection::SetNeighborThreshold(FLAGS_neighbor_threshold);
+      HotwordCorrection::SetFuzzyRejectRatio(FLAGS_fuzzy_reject_ratio);
+      HotwordCorrection::SetConfidenceWeightMin(FLAGS_confidence_weight_min);
       HotwordCorrection::LoadConfusionMatrix(FLAGS_confusion_matrix_path);
 
       if (!FLAGS_cmu_dict_path.empty()) {
