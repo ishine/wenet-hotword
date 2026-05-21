@@ -1,0 +1,54 @@
+name: aggressive
+paths:
+  decoder_bin: runtime/libtorch/build/bin/decoder_main
+  model_dir: ~/userspace/wenet/models/u2pp_conformer-asr-cn-16k-online
+  testset_dir: ~/userspace/wenet/aishell_test
+  eval_testset_dir: ~/userspace/wenet/aishell2_eval/test1000
+  pinyin_dict_dir: runtime/libtorch/build/bin/dict
+  out_dir: runtime/libtorch/eval_runs
+decode:
+  chunk_size: -1
+  num_left_chunks: -1
+  ctc_weight: 0.5
+  rescoring_weight: 1.0
+  reverse_weight: 0.0
+  nbest: 10
+  beam: 16.0
+  lattice_beam: 10.0
+  acoustic_scale: 1.0
+  blank_skip_thresh: 1.0
+  length_penalty: 0.0
+  max_active: 7000
+  min_active: 200
+hotword:
+  hotword_path: hotwords_aggressive.txt
+  fuzzy_threshold: 0.5
+  fuzzy_threshold_en: 0.5
+  max_append_path: 20
+  use_confidence_reward: true
+  context_score: 3.0
+  enable_hotword_cache: true
+  confusion_matrix_path: "runtime/libtorch/configs/confusion.csv"
+  bonus_weight: 2.0
+  confidence_floor: 0.4
+  neighbor_threshold: 0.5
+  fuzzy_reject_ratio: 0.8
+  confidence_weight_min: 0.2
+  bonus_length_scale: 0.5
+runtime:
+  thread_num: 0
+  warmup: 0
+  simulate_streaming: false
+autotune:
+  n_trials: 100
+  sampler: tpe
+  random_seed: 0
+  cer_baseline: 14.20
+  precision_floor: 0.0
+  optimize_f1: false
+  optimize_precision: false
+  study_name: aggressive
+  study_db: runtime/libtorch/configs/aggressive.study.db
+  tuned_config_out: runtime/libtorch/configs/aggressive.tuned.yaml
+  pareto_out: runtime/libtorch/configs/aggressive.pareto.jsonl
+  eval_metrics_out: runtime/libtorch/configs/aggressive.eval.txt

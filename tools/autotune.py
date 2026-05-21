@@ -376,40 +376,60 @@ def _build_sampler(name: str, seed: int) -> optuna.samplers.BaseSampler:
 
 
 def _knee_pick(trials: List[optuna.trial.FrozenTrial], cer_baseline: float,
-               precision_floor: float = 0.0,
+               precision_floor: float = 0.0, n_obj: int = 2,
                ) -> Optional[optuna.trial.FrozenTrial]:
-    """Pick the Pareto trial with the highest recall whose CER stays under
-    `cer_baseline`. If `precision_floor > 0`, further require
-    `trial.user_attrs['precision'] >= precision_floor`.
-    Falls back to the trial closest to the baseline (lowest CER) if every
-    Pareto trial violates the cap. Values are (recall, CER)."""
+    """Pick the best Pareto trial.
+
+    2D (primary, CER): pick highest primary under CER cap.
+    3D (F1, CER, Precision): pick the trial that maximises F1 * Precision
+    (product scalarization) under the CER cap — this naturally balances
+    recall and precision without a hard-coded floor.
+    """
     if not trials:
         return None
     candidates = [t for t in trials if t.values is not None and t.values[1] <= cer_baseline]
+
+    if n_obj == 3:
+        if candidates:
+            # Product scalarization: maximise F1 * Precision
+            return max(candidates, key=lambda t: t.values[0] * t.values[2])
+        return min(trials, key=lambda t: t.values[1])
+
+    # 2D logic (backward compatible)
     if precision_floor > 0:
         strict = [t for t in candidates
                   if t.user_attrs.get("precision", 0.0) >= precision_floor]
         if strict:
             return max(strict, key=lambda t: t.values[0])
-        # precision floor was too strict; fall back to CER-only among capped
         if candidates:
             return max(candidates, key=lambda t: t.values[0])
     elif candidates:
         return max(candidates, key=lambda t: t.values[0])
-    # everything blew through the CER cap; pick the lowest-CER point as a tie-break
     return min(trials, key=lambda t: t.values[1])
 
 
-def _serialize_trial(t: optuna.trial.FrozenTrial) -> Dict[str, Any]:
-    recall, cer = (t.values or [None, None])[:2]
-    rec = {
-        "trial_id": t.number,
-        "recall": recall,
-        "cer": cer,
-        "state": t.state.name,
-        "params": dict(t.params),
-        "user_attrs": dict(t.user_attrs),
-    }
+def _serialize_trial(t: optuna.trial.FrozenTrial, n_obj: int = 2) -> Dict[str, Any]:
+    if n_obj == 3:
+        f1, cer, prec = (t.values or [None, None, None])[:3]
+        rec = {
+            "trial_id": t.number,
+            "f1": f1,
+            "cer": cer,
+            "precision": prec,
+            "state": t.state.name,
+            "params": dict(t.params),
+            "user_attrs": dict(t.user_attrs),
+        }
+    else:
+        primary, cer = (t.values or [None, None])[:2]
+        rec = {
+            "trial_id": t.number,
+            "recall": primary,
+            "cer": cer,
+            "state": t.state.name,
+            "params": dict(t.params),
+            "user_attrs": dict(t.user_attrs),
+        }
     return rec
 
 
@@ -447,9 +467,16 @@ def main() -> int:
     p.add_argument("--model-config", default=None,
                    help="for --phase scene: YAML with frozen model-level params "
                         "(output of a prior --phase model run).")
+    p.add_argument("--hotword-path", default=None,
+                   help="override hotword.hotword_path in config "
+                        "(e.g. hotwords_aggressive.txt | hotwords_conservative.txt)")
     args = p.parse_args()
 
     base = DecoderConfig.from_yaml(args.config)
+
+    if args.hotword_path:
+        base.hotword.hotword_path = args.hotword_path
+        print(f"[info] hotword_path override -> {args.hotword_path}")
 
     # Phase setup
     if args.phase == "model":
@@ -503,10 +530,26 @@ def main() -> int:
             print(f"  {k}: {spec}")
         return 0
 
-    # Study setup: multi-objective (recall↑, CER↓) for both phases
+    # Study setup: 2-objective (recall↑, CER↓) or (F1↑, CER↓)
+    #            or 3-objective (F1↑, CER↓, Precision↑)
     study_name = f"{base.autotune.study_name}_{args.phase}"
-    directions = ["maximize", "minimize"]  # recall, CER
-    fail_val = (-1.0, 1e6)
+    optimize_f1 = base.autotune.optimize_f1
+    optimize_precision = base.autotune.optimize_precision
+    n_obj = 3 if optimize_precision else 2
+
+    if optimize_precision:
+        primary_metric = "F1+Precision"
+        directions = ["maximize", "minimize", "maximize"]  # F1, CER, Precision
+        fail_val = (-1.0, 1e6, -1.0)
+        print("[info] 3-objective mode: F1↑, CER↓, Precision↑")
+    elif optimize_f1:
+        primary_metric = "F1"
+        directions = ["maximize", "minimize"]  # F1, CER
+        fail_val = (-1.0, 1e6)
+    else:
+        primary_metric = "recall"
+        directions = ["maximize", "minimize"]  # recall, CER
+        fail_val = (-1.0, 1e6)
 
     sampler = _build_sampler(sampler_name, seed)
     study = optuna.create_study(
@@ -533,7 +576,7 @@ def main() -> int:
     # Status file for external monitoring
     status_file = os.path.join(work_dir, "autotune.status.json")
 
-    def _write_status(trial_num: int, completed: int, best_recall: float,
+    def _write_status(trial_num: int, completed: int, best_primary: float,
                       best_cer: float, pareto_size: int, wall_s: float):
         import json as _json
         try:
@@ -542,7 +585,7 @@ def main() -> int:
                     "phase": args.phase,
                     "trial_completed": completed,
                     "total_trials": n_trials,
-                    "best_recall": best_recall,
+                    "best_recall" if not optimize_f1 else "best_f1": best_primary,
                     "best_cer": best_cer,
                     "pareto_size": pareto_size,
                     "current_trial": trial_num,
@@ -568,12 +611,19 @@ def main() -> int:
             print(f"[trial {trial.number}] error: no recall")
             _write_status(trial.number, trial.number, 0.0, 999.0, 0, 0.0)
             return fail_val
-        print(f"[trial {trial.number}] R={t.recall:.2f}% CER={t.cer:.2f}% "
-              f"F1={t.f1:.2f}% wall={t.wall_s:.1f}s  {override}")
+        if optimize_precision:
+            print(f"[trial {trial.number}] F1={t.f1:.2f}% CER={t.cer:.2f}% "
+                  f"P={t.precision:.2f}% R={t.recall:.2f}% wall={t.wall_s:.1f}s  {override}")
+        elif optimize_f1:
+            print(f"[trial {trial.number}] F1={t.f1:.2f}% CER={t.cer:.2f}% "
+                  f"R={t.recall:.2f}% P={t.precision:.2f}% wall={t.wall_s:.1f}s  {override}")
+        else:
+            print(f"[trial {trial.number}] R={t.recall:.2f}% CER={t.cer:.2f}% "
+                  f"F1={t.f1:.2f}% wall={t.wall_s:.1f}s  {override}")
         # Update best metrics
         completed = len([tr for tr in study.trials
                         if tr.state == optuna.trial.TrialState.COMPLETE])
-        best_recall = max(
+        best_primary = max(
             (tr.values[0] for tr in study.trials
              if tr.state == optuna.trial.TrialState.COMPLETE
              and tr.values is not None),
@@ -584,9 +634,14 @@ def main() -> int:
              and tr.values is not None),
             default=999.0)
         pareto = study.best_trials if hasattr(study, 'best_trials') else []
-        _write_status(trial.number, completed, best_recall, best_cer,
+        _write_status(trial.number, completed, best_primary, best_cer,
                      len(pareto), t.wall_s)
-        return t.recall, t.cer
+        if optimize_precision:
+            return t.f1, t.cer, t.precision
+        elif optimize_f1:
+            return t.f1, t.cer
+        else:
+            return t.recall, t.cer
 
     remaining = max(0, n_trials - done_before)
     if remaining == 0:
@@ -606,11 +661,19 @@ def main() -> int:
     pareto = study.best_trials
     print()
     print(f"=== Pareto front ({len(pareto)} trials) ===")
-    print(f"{'trial':>6} {'R':>7} {'CER':>7}  overrides")
-    for t in sorted(pareto, key=lambda tt: -(tt.values[0] if tt.values else -1)):
-        recall, cer = t.values
-        ov = ",".join(f"{k}={v}" for k, v in t.params.items())
-        print(f"{t.number:>6} {recall:>6.2f}% {cer:>6.2f}%  {ov}")
+    if optimize_precision:
+        print(f"{'trial':>6} {'F1':>7} {'CER':>7} {'Prec':>7}  overrides")
+        for t in sorted(pareto, key=lambda tt: -(tt.values[0] if tt.values else -1)):
+            f1, cer, prec = t.values
+            ov = ",".join(f"{k}={v}" for k, v in t.params.items())
+            print(f"{t.number:>6} {f1:>6.2f}% {cer:>6.2f}% {prec:>6.2f}%  {ov}")
+    else:
+        primary_label = "F1" if optimize_f1 else "R"
+        print(f"{'trial':>6} {primary_label:>7} {'CER':>7}  overrides")
+        for t in sorted(pareto, key=lambda tt: -(tt.values[0] if tt.values else -1)):
+            primary, cer = t.values
+            ov = ",".join(f"{k}={v}" for k, v in t.params.items())
+            print(f"{t.number:>6} {primary:>6.2f}% {cer:>6.2f}%  {ov}")
 
     if not pareto:
         print("[error] no Pareto trials produced; nothing to persist", file=sys.stderr)
@@ -622,24 +685,34 @@ def main() -> int:
 
     holdout_results: Dict[int, TrialResult] = {}
     if do_holdout:
-        print(f"\n=== Pareto held-out eval on {eval_dir} ({len(pareto)} points) ===")
-        print(f"{'trial':>6} {'tune R':>8} {'tune CER':>9}  "
-              f"{'hold R':>8} {'hold CER':>9} {'hold P':>7} {'hold FP':>7}")
+        if optimize_precision:
+            print(f"\n=== Pareto held-out eval on {eval_dir} ({len(pareto)} points) ===")
+            print(f"{'trial':>6} {'tune F1':>8} {'tune CER':>9} {'tune P':>8}  "
+                  f"{'hold R':>8} {'hold CER':>9} {'hold P':>7} {'hold FP':>7}")
+        else:
+            primary_label = "F1" if optimize_f1 else "R"
+            print(f"\n=== Pareto held-out eval on {eval_dir} ({len(pareto)} points) ===")
+            print(f"{'trial':>6} {'tune ' + primary_label:>8} {'tune CER':>9}  "
+                  f"{'hold R':>8} {'hold CER':>9} {'hold P':>7} {'hold FP':>7}")
         for t in sorted(pareto, key=lambda tt: -(tt.values[0] if tt.values else -1)):
-            tune_R, tune_CER = t.values
+            if optimize_precision:
+                tune_f1, tune_CER, tune_P = t.values
+                tune_hdr = f"{tune_f1:>7.2f}% {tune_CER:>8.2f}% {tune_P:>7.2f}%"
+            else:
+                tune_primary, tune_CER = t.values
+                tune_hdr = f"{tune_primary:>7.2f}% {tune_CER:>8.2f}%"
             res = _run_trial(base, t.params, trial_id=900000 + t.number,
                              work_dir=work_dir,
                              log_decoder=args.keep_decoder_logs,
                              testset_override=eval_dir,
                              daemon_proc=daemon_proc)
             holdout_results[t.number] = res
-            if res.error or res.cer is None:
-                print(f"{t.number:>6} {tune_R:>7.2f}% {tune_CER:>8.2f}%   "
-                      f"error: {res.error}")
+            if res.error or res.cer is None or res.recall is None:
+                print(f"{t.number:>6} {tune_hdr}   error: {res.error or 'missing recall'}")
                 continue
             fp = (res.tp * (100.0 - res.precision) / res.precision
                   if res.precision else None)
-            print(f"{t.number:>6} {tune_R:>7.2f}% {tune_CER:>8.2f}%  "
+            print(f"{t.number:>6} {tune_hdr}  "
                   f"{res.recall:>7.2f}% {res.cer:>8.2f}% {res.precision:>6.2f}% "
                   f"{fp if fp is None else f'{fp:>6.2f}'}")
     else:
@@ -650,7 +723,7 @@ def main() -> int:
     os.makedirs(os.path.dirname(pareto_out) or ".", exist_ok=True)
     with open(pareto_out, "w") as f:
         for t in pareto:
-            rec = _serialize_trial(t)
+            rec = _serialize_trial(t, n_obj)
             res = holdout_results.get(t.number)
             if res is not None and res.cer is not None:
                 rec["holdout"] = {
@@ -703,18 +776,24 @@ def main() -> int:
         if best_pair is not None:
             best_trial, best_holdout = best_pair
         else:
-            best_trial, best_holdout = _knee_pick(pareto, cer_baseline, precision_floor), None
+            best_trial, best_holdout = _knee_pick(pareto, cer_baseline, precision_floor, n_obj), None
     else:
-        best_trial = _knee_pick(pareto, cer_baseline, precision_floor)
+        best_trial = _knee_pick(pareto, cer_baseline, precision_floor, n_obj)
         best_holdout = None
 
     if best_trial is None:
         print("[error] no Pareto trials usable", file=sys.stderr)
         return 2
 
-    tune_R, tune_CER = best_trial.values
-    print(f"\n[ok] selected: trial {best_trial.number}  via {pick_mode}")
-    print(f"       tune-set: R={tune_R:.2f}% CER={tune_CER:.2f}%")
+    if optimize_precision:
+        tune_F1, tune_CER, tune_P = best_trial.values
+        print(f"\n[ok] selected: trial {best_trial.number}  via {pick_mode}")
+        print(f"       tune-set: F1={tune_F1:.2f}% CER={tune_CER:.2f}% P={tune_P:.2f}%")
+    else:
+        tune_primary, tune_CER = best_trial.values
+        primary_label = "F1" if optimize_f1 else "R"
+        print(f"\n[ok] selected: trial {best_trial.number}  via {pick_mode}")
+        print(f"       tune-set: {primary_label}={tune_primary:.2f}% CER={tune_CER:.2f}%")
     if best_holdout is not None:
         print(f"       held-out: R={best_holdout.recall:.2f}% "
               f"CER={best_holdout.cer:.2f}% P={best_holdout.precision:.2f}%")
@@ -756,9 +835,14 @@ def main() -> int:
     os.makedirs(os.path.dirname(eval_out) or ".", exist_ok=True)
     with open(eval_out, "w") as f:
         f.write(f"# held-out eval of {tuned_out} on {eval_dir}\n")
-        f.write(f"# tune set: {_expand(base.paths.testset_dir, REPO_ROOT)} "
-                f"(selected trial {best_trial.number}: "
-                f"R={tune_R:.2f}% CER={tune_CER:.2f}%; pick={pick_mode})\n")
+        if optimize_precision:
+            f.write(f"# tune set: {_expand(base.paths.testset_dir, REPO_ROOT)} "
+                    f"(selected trial {best_trial.number}: "
+                    f"F1={tune_F1:.2f}% CER={tune_CER:.2f}% P={tune_P:.2f}%; pick={pick_mode})\n")
+        else:
+            f.write(f"# tune set: {_expand(base.paths.testset_dir, REPO_ROOT)} "
+                    f"(selected trial {best_trial.number}: "
+                    f"R={tune_primary:.2f}% CER={tune_CER:.2f}%; pick={pick_mode})\n")
         f.write(f"recall={res.recall:.2f}\n")
         f.write(f"CER={res.cer:.2f}\n")
         f.write(f"F1={res.f1:.2f}\n")

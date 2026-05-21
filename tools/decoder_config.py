@@ -264,12 +264,24 @@ class RuntimeConfig:
 
 
 @dataclass
+@dataclass
 class AutotuneConfig:
     n_trials: int = 100
     sampler: str = "nsga2"
     random_seed: int = 0
     cer_baseline: float = 14.20
     precision_floor: float = 0.0  # 0 = no floor; 95 = conservative hold-out guard
+    # When true, optimize (F1↑, CER↓) instead of (recall↑, CER↓).
+    # F1 naturally balances recall and precision, preventing over-aggressive
+    # configs that sacrifice precision for recall on hotword-dense tune sets.
+    optimize_f1: bool = False
+    # When true, add precision as a third Pareto objective:
+    # (F1↑, CER↓, Precision↑). This is the most conservative mode —
+    # precision is promoted from a logged metric to a first-class objective,
+    # so the Pareto front explicitly trades off recall, CER, and precision.
+    # No hard-coded precision_floor is needed; the sampler finds configs that
+    # are strong on all three axes simultaneously.
+    optimize_precision: bool = False
     study_name: str = "default"
     study_db: str = "runtime/libtorch/configs/default.study.db"
     tuned_config_out: str = "runtime/libtorch/configs/default.tuned.yaml"
