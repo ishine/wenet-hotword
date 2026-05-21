@@ -39,7 +39,7 @@ def load_kv(path):
             line = line.rstrip("\n")
             if not line:
                 continue
-            parts = line.split(" ", 1)
+            parts = line.split(None, 1)
             if len(parts) == 1:
                 out[parts[0]] = ""
             else:
@@ -100,6 +100,12 @@ def main():
         type=int,
         default=20,
         help="Only display the top-N hotwords (by ref-count) when --per-hotword is set",
+    )
+    p.add_argument(
+        "--baseline-hyp",
+        default="",
+        help="Baseline hypothesis for easy/hard subset classification. "
+             "Hotwords with baseline recall >= 80%% are 'easy', < 40%% are 'hard'.",
     )
     args = p.parse_args()
 
@@ -208,6 +214,83 @@ def main():
         for hw, kref, khyp, ktp, rec, prec in rows[: args.top]:
             print(f"{hw:<14s} {kref:>4d} {khyp:>4d} {ktp:>4d} "
                   f"{rec * 100:>6.2f}% {prec * 100:>6.2f}%")
+
+    # --- Easy / Hard subset evaluation ---
+    if args.baseline_hyp:
+        baseline = load_kv(args.baseline_hyp)
+        baseline_per_hw_ref = defaultdict(int)
+        baseline_per_hw_tp = defaultdict(int)
+        for utt_id, ref_text in ref.items():
+            hyp_text = baseline.get(utt_id, "")
+            ref_remaining = ref_text
+            hyp_remaining = hyp_text
+            for hw in hotwords_sorted:
+                kref = count_occurrences(ref_remaining, hw)
+                khyp = count_occurrences(hyp_remaining, hw)
+                if kref == 0 and khyp == 0:
+                    continue
+                tp = min(kref, khyp)
+                baseline_per_hw_ref[hw] += kref
+                baseline_per_hw_tp[hw] += tp
+                ref_remaining = ref_remaining.replace(hw, " " * len(hw))
+                hyp_remaining = hyp_remaining.replace(hw, " " * len(hw))
+
+        easy_set = set()
+        hard_set = set()
+        for hw in hotwords:
+            kref = baseline_per_hw_ref.get(hw, 0)
+            if kref == 0:
+                continue
+            brec = baseline_per_hw_tp.get(hw, 0) / kref
+            if brec >= 0.80:
+                easy_set.add(hw)
+            elif brec < 0.40:
+                hard_set.add(hw)
+
+        def _subset_metrics(subset_hw):
+            tp_s = miss_s = spur_s = 0
+            ref_s = hyp_s = 0
+            char_err_s = 0
+            char_total_s = 0
+            for utt_id, ref_text in ref.items():
+                hyp_text = hyp.get(utt_id, "")
+                ref_remaining = ref_text
+                hyp_remaining = hyp_text
+                for hw in hotwords_sorted:
+                    if hw not in subset_hw:
+                        continue
+                    kref = count_occurrences(ref_remaining, hw)
+                    khyp = count_occurrences(hyp_remaining, hw)
+                    if kref == 0 and khyp == 0:
+                        continue
+                    tp = min(kref, khyp)
+                    miss = max(0, kref - khyp)
+                    spur = max(0, khyp - kref)
+                    tp_s += tp
+                    miss_s += miss
+                    spur_s += spur
+                    ref_s += kref
+                    hyp_s += khyp
+                    char_total_s += kref * len(hw)
+                    char_err_s += miss * len(hw)
+                    ref_remaining = ref_remaining.replace(hw, " " * len(hw))
+                    hyp_remaining = hyp_remaining.replace(hw, " " * len(hw))
+            r = tp_s / ref_s if ref_s else 0.0
+            p = tp_s / hyp_s if hyp_s else 0.0
+            f = 2 * p * r / (p + r) if (p + r) > 0 else 0.0
+            return ref_s, hyp_s, tp_s, r, p, f, char_err_s, char_total_s
+
+        print()
+        print("=== Subset Evaluation (based on baseline recall) ===")
+        for label, subset in [("Easy (baseline >= 80%)", easy_set),
+                               ("Hard (baseline < 40%)", hard_set)]:
+            if not subset:
+                continue
+            ref_s, hyp_s, tp_s, r, p, f, ce, ct = _subset_metrics(subset)
+            print(f"{label}: {len(subset)} types, {ref_s} occ")
+            print(f"  recall={r*100:6.2f}% precision={p*100:6.2f}% F1={f*100:6.2f}%")
+            if ct:
+                print(f"  char-loss={ce*100/ct:6.2f}% ({ce}/{ct})")
 
 
 if __name__ == "__main__":

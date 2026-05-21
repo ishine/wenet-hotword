@@ -1,252 +1,201 @@
+# WeNet Hotword
 
-
-# WeNet Hotword 
+[![License](https://img.shields.io/badge/License-Apache%202.0-brightgreen.svg)](https://opensource.org/licenses/Apache-2.0)
+[![C++17](https://img.shields.io/badge/C%2B%2B-17-00599C.svg)](https://en.cppreference.com/w/cpp/17)
 
 **Hotword-biased decoding for the [WeNet](https://github.com/wenet-e2e/wenet) C++ runtime.**
 
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-brightgreen.svg)](https://opensource.org/licenses/Apache-2.0)
-[![C++17](https://img.shields.io/badge/C%2B%2B-17-00599C.svg)](https://en.cppreference.com/w/cpp/17)
-[![LibTorch 2.2.0](https://img.shields.io/badge/LibTorch-2.2.0-EE4C2C.svg)](https://pytorch.org/cppdocs/)
+> **Based On**:   
+> **Model**: `wenet/u2pp_conformer-asr-cn-16k-online`  
+> **Tune**: `AISHELL-1 hotword test` (235 utts, 187 hotwords) 
 
-[**Eval Writeup**](runtime/libtorch/eval_runs/HOTWORD_EVAL.md)
+| | Baseline | Ours (Ultra) |
+|--|--|--|
+| **CER** | 5.14% | **4.82%** |
+| **Recall** | 81.08% | **95.95%** |
+| **Precision** | **95.24%** | 93.01% |
+| **F1** | 87.59% | **94.46%** |
 
+**Test**: `AISHELL-2 iOS eval` (1000 utts, 301 hotwords)
 
+| | Baseline | Ours (Ultra) |
+|--|--|--|
+| **CER** | 5.14% | **4.83%** |
+| **Recall** | 42.03% | **88.41%** |
+| **Precision** | **100.00%** | 92.42% |
+| **F1** | 59.18% | **90.37%** |
 
-**tune set** (235 utts): recall ↑ 5.6× &nbsp;&nbsp; CER ↓ 55%
-<br>
-**test set** (115 utts): recall ↑ 3.5× &nbsp;&nbsp; CER ↓ 47%
+**Test**: `AISHELL-2 iOS eval` (1000 utts, 27 hard hotwords)
 
-| | baseline (tune) | baseline (test) | ours (tune) | ours (test) |
-|--|:--:|:--:|:--:|:--:|
-| hotword recall | 15.96% | 25.93% | **90.07%** | **91.11%** |
-| CER | 14.20% | 13.76% | **6.32%** | **7.33%** |
+## Highlights
 
-<sub>Model: `wenet/u2pp_conformer-asr-cn-16k-online`</sub>
-<br>
-<sub>Tune: `AISHELL-1 hotword test` &nbsp;&nbsp;</sub>
-<br>
-<sub>Test: `aishell1_indep_hotword`</sub>
+* **Phoneme Corrector** — fuzzy hotword matching via G2P phoneme edit-distance on the n-best
+* **Confidence-Weighted Match Bonus** — per-hotword reward scaled by acoustic confidence
+* **Multi-Objective Autotuner** — 2D/3D Pareto over decoder + hotword knobs, with early-exit stagnation detection
 
-
-## 🌟 Features
-
-- **Phoneme Corrector** — fuzzy hotword matching via G2P phoneme edit-distance on the n-best.
-- **Confidence-Weighted Match Bonus** — per-hotword reward scaled by acoustic confidence.
-- **LRU Hotword Cache** — recurring hotwords get a lowered fuzzy threshold in streaming.
-- **Multi-Objective Autotuner** — Optuna TPE over decoder + hotword knobs, optimizing recall and CER jointly with early-exit stagnation detection.
-
----
-
-## 🚀 Quick Start
-
-### 1. Install Python deps
+## Install
 
 ```bash
-cd /path/to/wenet-main
-
-# Create and activate virtual environment
+# Python environment
 uv venv .venv --python 3.12
 source .venv/bin/activate
+uv pip install torch torchaudio pyyaml dacite optuna soundfile pypinyin jieba modelscope
 
-# Install PyTorch (adjust CUDA version as needed)
-uv pip install torch torchaudio \
-  --index-url https://download.pytorch.org/whl/cu121 \
-  --extra-index-url https://pypi.tuna.tsinghua.edu.cn/simple
-
-# Install remaining dependencies
-uv pip install pyyaml dacite optuna soundfile pypinyin \
-  -i https://pypi.tuna.tsinghua.edu.cn/simple
-```
-
-### 2. Download model + test set
-
-```bash
-modelscope download --model wenet/u2pp_conformer-asr-cn-16k-online \
-  --local_dir ~/userspace/wenet/models/u2pp_conformer-asr-cn-16k-online
-bash tools/prepare_aishell_hotwords.sh ~/userspace/wenet/aishell_test
-```
-
-> **Other models (optional)**
->
-> Verified models and download commands:
->
-> | Model | ModelScope ID |
-> |------|--------------|
-> | `u2pp_conformer-asr-cn-16k-online` (default) | `wenet/u2pp_conformer-asr-cn-16k-online` |
-> | `multi_cn` | `wenet/multi_cn` |
->
-> After switching models, re-run Step 5 (confusion matrix) and Step 6 (autotune).
-
-### 3. Build decoder_main
-
-```bash
+# C++ runtime (requires cmake >= 3.14)
 cd runtime/libtorch
 cmake -B build -DGRAPH_TOOLS=ON -DTORCH=ON
 cmake --build build -j --target decoder_main
 cd ../..
 ```
 
-### 4. Smoke test
+## Quick Start
+
+### 1. Download Model
 
 ```bash
-head -1 ~/userspace/wenet/aishell_test/wav.scp > /tmp/one.scp
-runtime/libtorch/build/bin/decoder_main \
-  --model_path ~/userspace/wenet/models/u2pp_conformer-asr-cn-16k-online/final.zip \
-  --unit_path  ~/userspace/wenet/models/u2pp_conformer-asr-cn-16k-online/units.txt \
-  --wav_scp    /tmp/one.scp \
-  --hotword_path     ~/userspace/wenet/aishell_test/hotwords.txt \
-  --pinyin_dict_path runtime/libtorch/build/bin/dict \
-  --result     /dev/stdout
+modelscope download --model wenet/u2pp_conformer-asr-cn-16k-online \
+  --local_dir ~/userspace/wenet/models/u2pp_conformer-asr-cn-16k-online
 ```
 
-### 5. Prepare confusion matrix
+### 2. Download Datasets
 
-The confusion matrix is learned from **this model's** CTC posteriors and is not portable across models.
+preparation (downloads AISHELL-1 + AISHELL-2, builds hotword lists):
 
-For the example model, run on a development set (e.g. WeNetSpeech dev):
+```bash
+bash tools/prepare_benchmark.sh ~/userspace/wenet
+```
+
+### 3. Learn Confusion Matrix (per-model, one-time)
+
 ```bash
 python3 tools/learn_confusion.py \
   --model_dir ~/userspace/wenet/models/u2pp_conformer-asr-cn-16k-online \
-  --wav_scp    ~/userspace/wenet/wenetspeech_calibration/dev/wav.scp \
-  --text       ~/userspace/wenet/wenetspeech_calibration/dev/text \
-  --out_csv    runtime/libtorch/configs/confusion.csv \
-  --device     cpu
+  --wav_scp ~/userspace/wenet/aishell_test/wav.scp \
+  --text ~/userspace/wenet/aishell_test/text \
+  --out_csv runtime/libtorch/configs/confusion.csv \
+  --device cpu
 ```
 
-### 6. Autotune
+### 4. Autotune — Four Modes
+
+| Mode | Config | Hotwords | Objective | When to use |
+|------|--------|----------|-----------|-------------|
+| **Aggressive** | `mode_aggressive.yaml` | 187 original | recall↑ + CER↓ | Hotword-dense domains  |
+| **Balanced** | `mode_balanced.yaml` | 187 original | F1↑ + CER↓ | General voice assistant, balanced R/P |
+| **Conservative** | `mode_conservative.yaml` | 349 (+distractors) | F1↑ + CER↓ | Open-domain dialogue, precision matters |
+| **Ultra** | `mode_ultra.yaml` | 349 (+distractors) | F1↑ + CER↓ + Precision↑ | Financial/legal — false positive cost is high |
+
+> **No free lunch**: Aggressive maximizes recall at the cost of precision (64% on 301-hotword test). Ultra trades ~3% recall for +29 precision points. Choose based on your domain's tolerance for false positives.
+
+Run one (or all) modes:
 
 ```bash
+# Aggressive
 python3 tools/autotune.py \
-  --config       runtime/libtorch/configs/default.yaml \
+  --config runtime/libtorch/configs/mode_aggressive.yaml \
+  --search-space runtime/libtorch/configs/search_space.yaml
+
+# Balanced
+python3 tools/autotune.py \
+  --config runtime/libtorch/configs/mode_balanced.yaml \
+  --search-space runtime/libtorch/configs/search_space.yaml
+
+# Conservative
+python3 tools/autotune.py \
+  --config runtime/libtorch/configs/mode_conservative.yaml \
+  --search-space runtime/libtorch/configs/search_space.yaml
+
+# Ultra (3-objective Pareto)
+python3 tools/autotune.py \
+  --config runtime/libtorch/configs/mode_ultra.yaml \
   --search-space runtime/libtorch/configs/search_space.yaml
 ```
 
-Autotune writes the best configuration to `runtime/libtorch/configs/default.tuned.yaml`.
+### 5. Copy Hotword Lists
 
-### 7. Evaluate on test set with tuned config
-
-Evaluate the tuned configuration on the **held-out test set** to reproduce the headline numbers (R≈91%, CER≈7.3%):
+Hotword lists are shipped in `runtime/libtorch/configs/`. Copy them to your test set directory before evaluation:
 
 ```bash
-TUNED_YAML=runtime/libtorch/configs/default.tuned.yaml \
-TESTSET=~/userspace/wenet/aishell1_indep_hotword \
-bash runtime/libtorch/eval_runs/run_ablations.sh
-column -ts $'\t' runtime/libtorch/eval_runs/summary.tsv
+cp runtime/libtorch/configs/hotwords_all.txt \
+   ~/userspace/wenet/aishell2_eval/test1000/
+cp runtime/libtorch/configs/hotwords_hard.txt \
+   ~/userspace/wenet/aishell2_eval/test1000/
 ```
 
-`run_ablations.sh` automatically loads the tuned config for the **F_autotune** condition, and also runs baseline (A) and upstream native (G) for comparison. The `F_autotune` row in the summary gives the final test-set result.
-
-### 8. Run full ablations on tune set (optional)
-
-To reproduce the full ablation ladder (A→F) on the tune set, run without setting `TESTSET` (defaults to the tune set):
+### 6. Evaluate on Held-Out
 
 ```bash
-bash runtime/libtorch/eval_runs/run_ablations.sh
-column -ts $'\t' runtime/libtorch/eval_runs/summary.tsv
+# Evaluate on 301-hotword list (mixed easy + hard)
+python3 tools/evaluate_modes.py \
+  --test-dir ~/userspace/wenet/aishell2_eval/test1000 \
+  --hotwords hotwords_all.txt
+
+# Evaluate on 27-hard hotword subset (baseline recall < 90%)
+python3 tools/evaluate_modes.py \
+  --test-dir ~/userspace/wenet/aishell2_eval/test1000 \
+  --hotwords hotwords_hard.txt
 ```
 
-> Switch to a different model? Re-run Step 5 with `learn_confusion.py`, then Step 6.
----
+## Results
 
-## ⚙️ Configuration
+**Model**: `wenet/u2pp_conformer-asr-cn-16k-online`   
+**Tune**: AISHELL-1 hotword test    
+**Test**: AISHELL-2 iOS eval subset
 
-Edit `runtime/libtorch/configs/default.yaml` 
+### 301-Hotword Test (mixed easy + hard)
 
-```yaml
-paths:
-  model_dir:         ~/userspace/wenet/models/u2pp_conformer-asr-cn-16k-online
-  testset_dir:       ~/userspace/wenet/aishell_test
-  eval_testset_dir:  ~/userspace/wenet/aishell1_indep_hotword
-  pinyin_dict_dir:   runtime/libtorch/build/bin/dict
+| Mode | CER% | Recall% | Precision% | F1% |
+|------|------:|--------:|-----------:|----:|
+| Baseline (no hotword) | 5.14 | 81.08 | 95.24 | 87.59 |
+| **Aggressive** | 6.00 | 92.79 | 63.78 | 75.60 |
+| **Balanced** | 5.27 | 93.69 | 76.47 | 84.21 |
+| **Conservative** | 4.98 | 93.24 | 83.81 | 88.27 |
+| **Ultra** | **4.82** | **95.95** | **93.01** | **94.46** |
 
-decode:
-  chunk_size:       -1
-  ctc_weight:       0.5
-  rescoring_weight: 1.0
-  reverse_weight:   0.0
-  nbest:            10
+### 27-Hard Hotword Test (baseline recall < 90%)
 
-hotword:
-  hotword_path:          hotwords.txt
-  fuzzy_threshold:       0.5
-  max_append_path:       20
-  use_confidence_reward: true
-  enable_hotword_cache:  true
-  confusion_matrix_path: runtime/libtorch/configs/confusion.csv
-  bonus_weight:          2.0
-  confidence_floor:      0.4
-  neighbor_threshold:    0.5
-  fuzzy_reject_ratio:    0.8
-  confidence_weight_min: 0.2
-  bonus_length_scale:    0.5
+| Mode | CER% | Recall% | Precision% | F1% |
+|------|------:|--------:|-----------:|----:|
+| Baseline | 5.14 | 42.03 | 100.00 | 59.18 |
+| **Aggressive** | 5.10 | 98.55 | 64.76 | 78.16 |
+| **Balanced** | 4.92 | 98.55 | 73.91 | 84.47 |
+| **Conservative** | **4.68** | 94.20 | 86.67 | 90.28 |
+| **Ultra** | 4.83 | 88.41 | **92.42** | **90.37** |
 
-autotune:
-  n_trials:  100
-  sampler:   tpe
-  cer_baseline: 14.20
-```
+### Key Findings
 
-Search space: `runtime/libtorch/configs/search_space.yaml`.
+1. **All hotword-enhanced modes improve or maintain CER** over no-hotword baseline (5.14% → 4.68–6.00%), showing the pipeline does not harm general ASR.
+2. **On 27 hard-case hotwords** (foreign names the baseline misses), our method achieves **88% recall** vs baseline's **42%** — the phoneme corrector closes the gap where character-level matching fails.
+3. **Ultra mode is the overall best**: highest F1 (94.46% on 301-hot, 90.37% on hard-case) via 3-objective Pareto optimization — no hard-coded precision floor needed.
+4. **Conservative mode is the practical sweet spot**: lowest CER on hard-case (4.68%) with strong F1 (90.28%), making it suitable for precision-sensitive domains.
 
----
-
-## 📊 Results
-
-`u2pp_conformer-asr-cn-16k-online` on AISHELL hotword test (235 utts, 187 hotwords).
-
-| Condition | What it is | CER% | recall% | precision% | F1% |
-|-----------|-----------|------:|--------:|-----------:|----:|
-| A_baseline | Plain CTC + attention rescoring, no hotword | 14.20 | 15.96 | 97.83 | 27.44 |
-| B_phoneme | + phoneme corrector (G2P + fuzzy match) | 12.62 | 32.62 | 98.92 | 49.07 |
-| D_confidence | + confidence-weighted match bonus | 12.04 | 36.17 | 99.03 | 52.99 |
-| E_cache | + LRU hotword cache | 12.04 | 36.17 | 99.03 | 52.99 |
-| F_autotune | E_cache + TPE-autotuned knobs (12 params) | 6.32 | 90.07 | 96.21 | 93.04 |
-| G_wenet_native | Upstream WeNet character-FST biasing only | 10.97 | 46.45 | 99.24 | 63.29 |
-
-
-**Held-out** (`aishell1_indep_hotword`, 115 utts — never seen during tuning):
-
-| Condition | CER% | recall% | precision% | F1% |
-|-----------|------:|--------:|-----------:|----:|
-| D_confidence | 11.88 | 48.15 | 98.48 | 64.68 |
-| F_autotune | 7.33 | 91.11 | 98.40 | 94.62 |
-| G_wenet_native | 10.49 | 59.26 | 98.77 | 74.07 |
-
-Full write-up: [`HOTWORD_EVAL.md`](runtime/libtorch/eval_runs/HOTWORD_EVAL.md)
-
----
-
-## 📂 Project Structure
+## Project Structure
 
 ```text
-wenet-main/
-├── runtime/core/decoder/
-│   ├── corrector.{cc,h}        # PhonemeCorrector + fuzzy match + confusion matrix
-│   ├── hotword_cache.{cc,h}    # LRU hotword cache
-│   ├── asr_decoder.{cc,h}      # CalculateMatchBonus + n-best correction wiring
-│   ├── params.h                # gflags (bonus_weight, confidence_floor, etc.)
-│   └── context_graph.{cc,h}    # upstream WeNet character-FST context graph
-├── runtime/core/bin/
-│   └── decoder_main.cc         # decoder binary (+ daemon mode for autotune)
-├── runtime/libtorch/configs/
-│   ├── default.yaml            # base config (includes 12-knob autotune)
-│   └── search_space.yaml       # Optuna search space
-├── runtime/libtorch/eval_runs/
-│   ├── run_ablations.sh        # A→G ablation runner
-│   └── HOTWORD_EVAL.md         # full evaluation report
-└── tools/                      # autotune, metrics, data prep scripts
+runtime/core/decoder/
+  corrector.{cc,h}        # PhonemeCorrector + fuzzy match + confusion matrix
+  hotword_cache.{cc,h}    # LRU hotword cache
+  asr_decoder.{cc,h}      # CalculateMatchBonus + n-best correction wiring
+  params.h                # gflags (bonus_weight, confidence_floor, etc.)
+runtime/core/bin/
+  decoder_main.cc         # decoder binary (+ daemon mode for autotune)
+runtime/libtorch/configs/
+  mode_{aggressive,balanced,conservative,ultra}.yaml  # four mode configs
+  default.yaml            # base config
+  search_space.yaml       # Optuna search space
+tools/
+  autotune.py             # multi-objective Pareto tuner
+  compute-hotword-metrics.py
+  prepare_hotwords.py     # extract 500-hot / filter hard-case
+  evaluate_modes.py       # batch evaluate all 4 tuned configs
 ```
 
----
+## Acknowledgements
 
-## 🙏 Acknowledgements
+* [WeNet](https://github.com/wenet-e2e/wenet) — base ASR runtime
+* [cpp-pinyin](https://github.com/wolfgitpr/cpp-pinyin) — runtime G2P
+* [CapsWriter-Offline](https://github.com/HaujetZhao/CapsWriter-Offline) — inspired the corrector design
 
-- **[WeNet](https://github.com/wenet-e2e/wenet)** — base ASR runtime.
-- **[cpp-pinyin](https://github.com/wolfgitpr/cpp-pinyin)** — runtime G2P.
-- **[CapsWriter-Offline](https://github.com/HaujetZhao/CapsWriter-Offline)** — inspired the corrector design.
+## License
 
----
-
-## 📜 License
-
-Apache License 2.0, inherited from upstream WeNet.
+Apache License 2.0

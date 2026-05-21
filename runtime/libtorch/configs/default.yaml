@@ -24,7 +24,7 @@ paths:
   # Held-out test set for the post-tune eval pass. Leave empty to skip.
   # The default set (I_indep in HOTWORD_EVAL.md) shares the hotword list with
   # testset_dir but uses disjoint audio, so generalization is measurable.
-  eval_testset_dir: ~/userspace/wenet/aishell1_indep_hotword
+  eval_testset_dir: ~/userspace/wenet/aishell2_eval/test1000
   # cpp-pinyin dictionary directory; built alongside decoder_main.
   pinyin_dict_dir: runtime/libtorch/build/bin/dict
   out_dir: runtime/libtorch/eval_runs
@@ -102,6 +102,15 @@ autotune:
   # generalization on a broader-domain hold-out set (the AWQ-style bias
   # strength constraint).
   precision_floor: 0.0
+  # Optimize F1 instead of raw recall. Recommended when the tune-set has
+  # artificially high hotword density (e.g. AISHELL-1 hotword test), because
+  # F1 naturally penalizes precision loss and prevents over-aggressive configs.
+  optimize_f1: true
+  # When true, promote precision to a third Pareto objective:
+  # (F1↑, CER↓, Precision↑). This is the most conservative mode — the sampler
+  # finds configs that are strong on all three axes simultaneously. No hard-coded
+  # precision_floor is needed. Use with a hotword list that includes distractors.
+  optimize_precision: false
   study_name: default
   # Persistence (relative to repo root). The study_db is the source of truth;
   # delete it to restart, keep it to resume / extend.
